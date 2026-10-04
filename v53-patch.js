@@ -1,5 +1,18 @@
 (()=>{
   document.title='SaveFlow Cashback V53';
+
+  // V53.1 header cleanup: remove leaked developer comment and old subtitle.
+  const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  const removeTextNodes=[];
+  while(walker.nextNode()){
+    const n=walker.currentNode;
+    if((n.nodeValue||'').includes('V25 data additions:')) removeTextNodes.push(n);
+  }
+  removeTextNodes.forEach(n=>n.remove());
+  document.querySelectorAll('body *').forEach(el=>{
+    if(el.children.length===0 && (el.textContent||'').trim()==='кешбеки українських банків') el.remove();
+  });
+
   const css=`
 .scanner-card{width:min(920px,100%)}.scanner-head{padding-right:34px}.scanner-copy{max-width:720px}
 .scanner-summary{border:1px solid var(--line);border-radius:16px;padding:14px 15px;background:#fbfaf7;display:grid;gap:6px;margin:16px 0 14px}
@@ -21,7 +34,7 @@
   let openBtn=oldToggle;
   if(oldToggle){openBtn=oldToggle.cloneNode(true);oldToggle.replaceWith(openBtn)}
   const modal=document.getElementById('scannerModal'),closeBtn=document.getElementById('scannerClose'),runBtn=document.getElementById('scannerRun'),refreshBtn=document.getElementById('scannerRefresh'),list=document.getElementById('scannerList'),err=document.getElementById('scannerError'),sourceCount=document.getElementById('scannerSourceCount'),pendingCount=document.getElementById('scannerPendingCount'),lastRun=document.getElementById('scannerLastRun'),summary=document.getElementById('scannerSummary'),reviewTitle=document.getElementById('scannerReviewTitle');
-  const esc=v=>String(v??'').replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+  const esc=v=>String(v??'').replace(/[&<>'\"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[ch]));
   const cloud=()=>{const x=window.saveflowCloud;return x?.client&&x?.session?.user&&x?.profile?.role==='admin'?x:null};
   const close=()=>{modal.classList.remove('open');modal.setAttribute('aria-hidden','true')};
   const typeLabel=t=>({reference_to_official_review:'Потрібно звірити reference з official',official_source_changed:'Офіційне джерело змінилося',reference_change_signal:'Контрольне джерело змінилося',dynamic_or_personalized_source_changed:'Dynamic / personalized · ручна перевірка'})[t]||t||'Зміна джерела';
