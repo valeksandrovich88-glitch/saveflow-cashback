@@ -15,8 +15,9 @@
   const st=document.createElement('style');
   st.textContent=`
     #siteAdminBar .site-admin-copy{display:none!important}
-    #userModeToggle,#changeHistoryToggle{display:none!important}
-    #userModePanel{display:none!important}
+    #userModeToggle,#changeHistoryToggle,#sourceAuditToggle,#siteBackupExport{display:none!important}
+    #userModePanel,#sourceAuditPanel{display:none!important}
+    label[for="siteBackupImport"],label.file-btn:has(#siteBackupImport){display:none!important}
     #siteEditToggle .admin-lock-status{display:none!important}
     #siteAdminBar{justify-content:flex-end;margin:-12px 0 22px;padding:9px 10px;background:transparent;border-color:transparent}
     #siteAdminBar.editing{background:#eaf2ec;border-color:#cbd9cf}
@@ -24,6 +25,10 @@
     @media(max-width:760px){#siteAdminBar{align-items:center;flex-direction:row}#siteAdminBar .site-admin-actions{justify-content:flex-end}}
   `;
   document.head.appendChild(st);
+
+  // Make sure source-audit mode never remains visually active when the toolbar control is hidden.
+  document.body.classList.remove('admin-source-mode');
+  document.getElementById('sourceAuditPanel')?.classList.remove('show');
 
   // Account UX: email + password only. Cloud sync stays automatic.
   document.getElementById('authCopy')?.remove();
