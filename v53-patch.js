@@ -17,6 +17,7 @@
     #siteAdminBar .site-admin-copy{display:none!important}
     #userModeToggle,#changeHistoryToggle{display:none!important}
     #userModePanel{display:none!important}
+    #siteEditToggle .admin-lock-status{display:none!important}
     #siteAdminBar{justify-content:flex-end;margin:-12px 0 22px;padding:9px 10px;background:transparent;border-color:transparent}
     #siteAdminBar.editing{background:#eaf2ec;border-color:#cbd9cf}
     #siteAdminBar .site-admin-actions{width:100%;justify-content:flex-end}
