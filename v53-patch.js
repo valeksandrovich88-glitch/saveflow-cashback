@@ -19,6 +19,11 @@
     #userModePanel,#sourceAuditPanel{display:none!important}
     label[for="siteBackupImport"],label.file-btn:has(#siteBackupImport){display:none!important}
     #siteEditToggle .admin-lock-status{display:none!important}
+
+    /* Legacy local backup controls are kept in code but removed from the UI. */
+    #matrixExportBtn,#matrixResetAll,#bonusExportBtn,#bonusImportLabel{display:none!important}
+    label[for="matrixImportInput"],label.file-btn:has(#matrixImportInput){display:none!important}
+
     #siteAdminBar{justify-content:flex-end;margin:-12px 0 22px;padding:9px 10px;background:transparent;border-color:transparent}
     #siteAdminBar.editing{background:#eaf2ec;border-color:#cbd9cf}
     #siteAdminBar .site-admin-actions{width:100%;justify-content:flex-end}
@@ -29,6 +34,13 @@
   // Make sure source-audit mode never remains visually active when the toolbar control is hidden.
   document.body.classList.remove('admin-source-mode');
   document.getElementById('sourceAuditPanel')?.classList.remove('show');
+
+  // Simplify the bonuses description.
+  const bonuses=document.getElementById('bonuses');
+  const bonusesKicker=bonuses?.querySelector('.section-kicker');
+  if(bonusesKicker){
+    bonusesKicker.textContent='Окремий блок для бонусів за запрошення друзів, стартових welcome-бонусів та інших програм.';
+  }
 
   // Account UX: email + password only. Cloud sync stays automatic.
   document.getElementById('authCopy')?.remove();
