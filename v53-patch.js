@@ -11,7 +11,7 @@
   trash.forEach(n=>n.remove());
   document.querySelectorAll('.brand-sub').forEach(el=>el.remove());
 
-  // Keep the base V52 scanner UI exactly as it is. This patch only cleans the admin bar.
+  // Keep the base V52 scanner UI exactly as it is. Clean only public/admin chrome.
   const st=document.createElement('style');
   st.textContent=`
     #siteAdminBar .site-admin-copy{display:none!important}
@@ -24,4 +24,33 @@
     @media(max-width:760px){#siteAdminBar{align-items:center;flex-direction:row}#siteAdminBar .site-admin-actions{justify-content:flex-end}}
   `;
   document.head.appendChild(st);
+
+  // Account UX: email + password only. Cloud sync stays automatic.
+  document.getElementById('authCopy')?.remove();
+  document.getElementById('authNameField')?.remove();
+  document.getElementById('authSyncNow')?.remove();
+
+  const tidyAccount=()=>{
+    const state=window.saveflowAuthState;
+    const signed=!!state?.session?.user;
+    const title=document.getElementById('authTitle');
+    const accountBtn=document.getElementById('accountToggle');
+    if(signed){
+      if(title) title.textContent='Акаунт';
+      if(accountBtn) accountBtn.textContent=state.session.user.email||'Акаунт';
+    }
+  };
+  window.addEventListener('saveflow-auth-change',tidyAccount);
+  tidyAccount();
+
+  // Do not show redundant success confirmations after a successful sign-in.
+  const authMsg=document.getElementById('authMessage');
+  if(authMsg){
+    const cleanSuccess=()=>{
+      const text=(authMsg.textContent||'').trim();
+      if(text==='Вхід виконано.'||text==='Акаунт створено і вхід виконано.') authMsg.textContent='';
+    };
+    new MutationObserver(cleanSuccess).observe(authMsg,{childList:true,subtree:true,characterData:true});
+    cleanSuccess();
+  }
 })();
