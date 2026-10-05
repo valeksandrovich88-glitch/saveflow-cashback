@@ -9,7 +9,7 @@
     const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
     const ds=new DecompressionStream('gzip');
     let html=await new Response(new Blob([bin]).stream().pipeThrough(ds)).text();
-    const patchTag='<script src="/v53-patch.js?v=535"></'+'script>';
+    const patchTag='<script src="/v53-patch.js?v=536"></'+'script>';
     html=html.replace('</body>',patchTag+'</body>');
     document.open();
     document.write(html);
