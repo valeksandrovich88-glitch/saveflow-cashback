@@ -1,75 +1,91 @@
 (()=>{
-  // V54 visual experiment: deep green edges, lighter content islands.
+  // V55 visual experiment: one continuous green gradient through the whole site.
   const st=document.createElement('style');
   st.id='saveflow-v54-theme';
   st.textContent=`
     :root{
-      --card:#edf5ec;
-      --line:#c8d8ca;
+      --card:rgba(238,248,239,.46);
+      --line:rgba(216,236,220,.52);
       --green:#245f40;
-      --green-bg:#cfe5d2;
-      --shadow:0 12px 32px rgba(5,20,10,.14);
+      --green-bg:rgba(202,229,208,.44);
+      --shadow:0 12px 30px rgba(3,17,9,.14);
     }
 
-    html{background:#07140d!important}
+    html{background:#06120b!important}
     body{
       min-height:100vh;
+      color:#102219;
       background:
-        radial-gradient(ellipse at 50% 28%, #789b80 0%, #5f8469 24%, #3f654b 48%, #23412e 70%, #10251a 86%, #07140d 100%)!important;
+        radial-gradient(ellipse 76% 110% at 50% 40%,
+          #dcebd8 0%,
+          #c4dcc1 28%,
+          #9fbd9f 48%,
+          #6f9677 63%,
+          #45694f 74%,
+          #294834 84%,
+          #142b1d 92%,
+          #06120b 100%)!important;
       background-attachment:fixed!important;
     }
 
+    /* Header also lets the same background show through. */
     .header{
-      background:rgba(7,20,13,.88)!important;
-      border-bottom-color:rgba(220,240,225,.12)!important;
-      box-shadow:0 8px 30px rgba(0,0,0,.12);
+      background:rgba(7,22,13,.54)!important;
+      border-bottom-color:rgba(222,241,226,.18)!important;
+      box-shadow:0 8px 26px rgba(0,0,0,.10)!important;
+      backdrop-filter:blur(7px);
     }
-    .brand-name{color:#f1f7f2!important}
-    .mark{background:#dcebdc!important;color:#17301f!important}
-    .top-nav button{background:rgba(224,239,225,.12)!important;color:#dce9df!important;border-color:rgba(228,242,231,.08)!important}
-    .top-nav button:hover{background:rgba(232,244,234,.2)!important;border-color:rgba(232,244,234,.18)!important}
-    .top-nav button.active{background:#dcebdc!important;color:#183120!important;border-color:#dcebdc!important}
+    .brand-name{color:#f2f8f3!important}
+    .mark{background:rgba(231,244,232,.88)!important;color:#17301f!important}
+    .top-nav button{background:rgba(228,241,230,.10)!important;color:#e0ebe2!important;border-color:rgba(228,242,231,.12)!important}
+    .top-nav button:hover{background:rgba(235,246,236,.19)!important;border-color:rgba(235,246,236,.22)!important}
+    .top-nav button.active{background:rgba(232,244,233,.88)!important;color:#183120!important;border-color:rgba(232,244,233,.72)!important}
 
-    main>h1,.section-title{color:#f3f8f4!important;text-shadow:0 1px 1px rgba(0,0,0,.08)}
-    .section-kicker,.footnotes{color:#d2dfd5!important}
+    main>h1,.section-title{color:#f4f8f4!important;text-shadow:0 1px 2px rgba(0,0,0,.13)}
+    .section-kicker,.footnotes{color:rgba(235,244,237,.88)!important}
 
+    /* Cards no longer have their own opaque fill: the page gradient continues through them. */
     .matrix-card,
     .partner-card,
     .promo-card,
     .bonus-card,
     .update-log details{
-      background:linear-gradient(145deg,#f3f8f1 0%,#e5f0e4 100%)!important;
-      border-color:rgba(31,73,46,.22)!important;
-      box-shadow:0 14px 34px rgba(4,18,9,.16)!important;
+      background:rgba(239,248,240,.48)!important;
+      border-color:rgba(225,240,228,.62)!important;
+      box-shadow:0 12px 30px rgba(3,18,9,.13), inset 0 1px 0 rgba(255,255,255,.28)!important;
     }
 
-    .filters{
-      background:rgba(220,235,220,.82)!important;
-      border-color:rgba(27,70,42,.2)!important;
-      box-shadow:0 10px 26px rgba(5,22,11,.08)!important;
-      backdrop-filter:blur(8px);
-    }
-    .filters input,.filter-menu summary,.sort-select{
-      background:#f3f8f1!important;
-      border-color:#bfd1c1!important;
+    .filters,
+    .content-edit-toolbar,
+    .bonus-link-slot,
+    .empty-state{
+      background:rgba(235,246,237,.34)!important;
+      border-color:rgba(220,238,224,.55)!important;
+      box-shadow:none!important;
     }
 
-    thead th{background:#dce9dc!important}
-    tbody td{background:rgba(238,246,237,.82)}
-    tbody td:first-child{background:#e8f2e7!important}
-    th,td{border-color:#c5d5c7!important}
-    .cash{background:#dfeade!important}
-    .cash.best{background:#c8e1cd!important;color:#174e31!important}
-    .tag{background:#d7e5d7!important;color:#46604d!important}
-    .bonus-link-slot,.empty-state{background:#e6efe4!important;border-color:#bfd0c0!important}
-
+    .filters input,.filter-menu summary,.sort-select,
     .matrix-btn,.bonus-btn,.content-btn{
-      background:#f2f7f0!important;
-      border-color:#bfd0c1!important;
+      background:rgba(246,251,246,.58)!important;
+      border-color:rgba(200,221,204,.72)!important;
     }
-    .matrix-btn:hover,.bonus-btn:hover,.content-btn:hover{background:#e2eee1!important}
-    .matrix-btn.primary,#personalMatrixDone{background:#183c29!important;color:#fff!important;border-color:#183c29!important}
-    .matrix-btn.primary:hover,#personalMatrixDone:hover{background:#24543a!important}
+    .matrix-btn:hover,.bonus-btn:hover,.content-btn:hover{background:rgba(249,253,249,.76)!important}
+    .matrix-btn.primary,#personalMatrixDone{background:rgba(20,59,38,.92)!important;color:#fff!important;border-color:rgba(20,59,38,.92)!important}
+    .matrix-btn.primary:hover,#personalMatrixDone:hover{background:rgba(31,82,53,.95)!important}
+
+    /* Matrix: transparent layers keep the global gradient visible from cell to cell. */
+    .matrix-card,.matrix-scroll,table,thead,tbody,tr{background:transparent!important}
+    thead th{background:rgba(226,240,228,.44)!important}
+    tbody td{background:rgba(242,249,242,.26)!important}
+    tbody td:first-child{background:rgba(232,243,233,.38)!important}
+    th,td{border-color:rgba(190,215,195,.62)!important}
+    .cash{background:rgba(225,239,227,.42)!important}
+    .cash.best{background:rgba(183,220,192,.56)!important;color:#174e31!important}
+    .tag{background:rgba(214,231,216,.44)!important;color:#3d5845!important}
+
+    /* Keep card text readable while preserving the transparent surfaces. */
+    .partner-card,.promo-card,.bonus-card,.matrix-card{color:#13271b!important}
+    .partner-card .muted,.promo-card .muted,.bonus-card .muted{color:#53695a!important}
 
     /* Personal edit pencil lives at the far left of the matrix toolbar. */
     #personalMatrixToggle{margin-right:auto!important;flex:0 0 auto}
@@ -78,14 +94,17 @@
     /* Old developer/storage explanation is not user-facing. */
     .matrix-storage-note{display:none!important}
 
-    /* Keep dialogs readable while staying in the palette. */
+    /* Dialogs stay more opaque for readability; the site behind them still keeps the gradient. */
     .matrix-modal-card,.bonus-modal-card,.auth-card,.scanner-card,.content-modal-card,.user-banks-card{
-      background:#f3f7f1!important;
-      border-color:#c3d3c5!important;
+      background:rgba(243,249,243,.94)!important;
+      border-color:rgba(195,216,199,.88)!important;
     }
 
     @media(max-width:760px){
-      body{background:linear-gradient(180deg,#183322 0%,#42684d 35%,#274832 72%,#09170f 100%)!important}
+      body{
+        background:radial-gradient(ellipse 125% 90% at 50% 36%,#d5e8d2 0%,#a5c4a6 37%,#63896b 61%,#2d5038 80%,#09170f 100%)!important;
+        background-attachment:fixed!important;
+      }
       #personalMatrixToggle::after{left:0!important;right:auto!important}
     }
   `;
