@@ -155,4 +155,25 @@
 
   window.addEventListener('saveflow-auth-change',()=>setTimeout(pullGlobal,0));
   setTimeout(pullGlobal,600);
+
+
+  function tidyCloudLabels(){
+    const edits=[
+      ['matrixEditStatus',[/локальних змін:/g,'змін:'],[/Правки можна внести прямо в таблицю/g,'Глобальні правки зберігаються у хмарі']],
+      ['partnerEditStatus',[/Локальних змін партнерів:/g,'Змін партнерів:'],[/твої локальні правки/g,'хмарні правки']],
+      ['promoEditStatus',[/Локальних змін спецпропозицій:/g,'Змін спецпропозицій:'],[/твої локальні правки/g,'хмарні правки']],
+      ['bonusEditStatus',[/локальних змін:/g,'змін:'],[/Збережено локальних змін:/g,'Збережено змін:']]
+    ];
+    edits.forEach(([id,...rules])=>{
+      const el=document.getElementById(id);if(!el)return;
+      let t=el.textContent||'';rules.forEach(([a,b])=>t=t.replace(a,b));if(t!==el.textContent)el.textContent=t;
+    });
+    const contentCtx=document.getElementById('contentEditorContext');
+    if(contentCtx) contentCtx.textContent=(contentCtx.textContent||'').replace('зміна буде локальною','буде створено глобальну правку');
+    const bonusCtx=document.getElementById('bonusEditorContext');
+    if(bonusCtx) bonusCtx.textContent=(bonusCtx.textContent||'').replace('буде створено локальну правку','буде створено глобальну правку');
+  }
+  const cloudLabelIds=['matrixEditStatus','partnerEditStatus','promoEditStatus','bonusEditStatus','contentEditorContext','bonusEditorContext'];
+  cloudLabelIds.forEach(id=>{const el=document.getElementById(id);if(el)new MutationObserver(tidyCloudLabels).observe(el,{childList:true,subtree:true,characterData:true});});
+  tidyCloudLabels();
 })();
