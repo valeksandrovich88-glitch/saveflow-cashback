@@ -1,10 +1,9 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
-const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 32;
+const FINGERPRINT_VERSION = 6;
+const PARSER_VERSION = 33;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -45,6 +44,10 @@ function detectAccessBlock(raw: string) {
   if (cloudflare && (s.length < 20_000 || /<title[^>]*>\s*Just a moment/i.test(s))) return "antibot_challenge";
   if (s.length < 20_000 && (/<title>\s*Access Denied\s*<\/title>|\baccess denied\b/i.test(s))) return "access_denied";
   return null;
+}
+async function sha256Bytes(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 function titleFromHtml(html: string) { const m=html.match(/<title[^>]*>([\s\S]*?)<\/title>/i); return m ? cleanText(m[1]).slice(0,300) : null; }
 
@@ -650,42 +653,18 @@ Deno.serve(async (req) => {
   let changed=0, failed=0, candidates=0;
   const results: unknown[]=[];
 
-  async function extractPdfText(bytes: Uint8Array) {
-  const pdf = await getDocumentProxy(bytes);
-  try {
-    if (pdf.numPages > 320) throw new Error(`PDF has too many pages: ${pdf.numPages}`);
-    const pages: string[] = [];
-    let chars = 0;
-    for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
-      const page = await pdf.getPage(pageNo);
-      const content = await page.getTextContent();
-      let pageText = "";
-      for (const item of (content.items || []) as any[]) {
-        const str = typeof item?.str === "string" ? item.str : "";
-        if (!str) continue;
-        pageText += str + (item?.hasEOL ? "\n" : " ");
-      }
-      pageText = pageText.split(/\n+/).map((line) => line.replace(/[ \t]+/g, " ").trim()).filter(Boolean).join("\n");
-      if (pageText) { pages.push(pageText); chars += pageText.length + 1; }
-      if (chars >= 180_000) break;
-    }
-    return pages.join("\n");
-  } finally {
-    try { await pdf.destroy(); } catch (_) {}
-  }
-}
-
-async function readFetchedResponse(res: Response) {
+  async function readFetchedResponse(res: Response) {
   const bytes = new Uint8Array(await res.arrayBuffer());
   const contentType = String(res.headers.get("content-type") || "");
   const magic = bytes.length >= 5 ? String.fromCharCode(...bytes.slice(0, 5)) : "";
   const isPdf = /application\/pdf/i.test(contentType) || magic === "%PDF-";
   if (isPdf) {
-    const raw = await extractPdfText(bytes);
-    return { raw, responseBytes: bytes.byteLength, documentType: "pdf", contentType };
+    const binaryHash = await sha256Bytes(bytes);
+    return { raw: "", responseBytes: bytes.byteLength, documentType: "pdf", contentType, binaryHash };
   }
   return { raw: new TextDecoder().decode(bytes), responseBytes: bytes.byteLength, documentType: "html", contentType };
 }
+
 async function loadMastercardSubscriptionSource() {
   const origin = "https://bilshe.mastercard.ua";
   const commonHeaders = {
@@ -755,9 +734,20 @@ async function loadSource(source: any) {
   async function scanOne(source:any) {
     const oldHash=source.last_hash||null, sourceFingerprintVersion=Number(source.fingerprint_version||0);
     try {
-      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text,source.id), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
-      let structured=extractStructured(source, focused, pageTitle);
-      if(source.id==="creditdnepr-cashback") structured=normalizeCreditDniproStructured(text,structured);
+      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), isPdf=loaded.documentType==="pdf", accessBlock=isPdf?null:detectAccessBlock(raw);
+      let text="", focused="", safeFocused="", pageTitle=isPdf?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null), categoryPool:any[]=[], structured:any, hash:string;
+      if(isPdf){
+        const {data:previousRows}=await service.from("scanner_snapshots").select("structured_payload,title,text_excerpt").eq("source_id",source.id).not("structured_payload","is",null).order("fetched_at",{ascending:false}).limit(1);
+        const previous=previousRows?.[0]||null, cached=previous?.structured_payload&&typeof previous.structured_payload==="object"?previous.structured_payload:null, binaryHash=String(loaded.binaryHash||"");
+        if(!binaryHash) throw new Error("PDF fingerprint missing");
+        const pdfChanged=!!oldHash&&sourceFingerprintVersion===FINGERPRINT_VERSION&&oldHash!==binaryHash;
+        structured=cached?{...cached,parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||cached.bank||null,source_url:source.url,source_role:source.source_role||cached.source_role||"primary",data_mode:source.data_mode||cached.data_mode||"fixed",publish_policy:source.publish_policy||cached.publish_policy||"review_required",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged}:{parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||null,source_url:source.url,source_role:source.source_role||"primary",data_mode:source.data_mode||"fixed",publish_policy:source.publish_policy||"review_required",parser_profile:source.parser_profile||"rules",review_policy:{auto_publish:false,official_primary:source.source_role==="primary",reference_only:source.source_role==="reference",manual_only:true,requires_human_review:true},unsupported:false,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null,confidence:"fingerprint_only",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged};
+        pageTitle=previous?.title||pageTitle; safeFocused=safeDbText(previous?.text_excerpt||""); hash=binaryHash;
+      }else{
+        text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
+        if(source.id==="creditdnepr-cashback") structured=normalizeCreditDniproStructured(text,structured);
+        hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
+      }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
       if(explicitMaxCashback!==null){
         const limits={...(structured.limits||{})};
@@ -776,9 +766,7 @@ async function loadSource(source: any) {
       }
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
-      const safeFocused=safeDbText(focused);
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      const fingerprintInput=accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused, hash=await sha256(fingerprintInput);
       const isInitial=!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION, isChanged=!isInitial&&oldHash!==hash&&!structured.unsupported;
       const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
       await service.from("scanner_sources").update({ last_checked_at:new Date().toISOString(), last_http_status:loaded.status, last_hash:hash, last_error:null, fingerprint_version:FINGERPRINT_VERSION }).eq("id",source.id);
@@ -810,7 +798,7 @@ async function loadSource(source: any) {
         const {data,error}=await service.from("scanner_candidates").insert({ run_id:run.id, source_id:source.id, bank:source.bank||null, candidate_type:type, priority, source_role:source.source_role, old_hash:oldHash, new_hash:hash, affected_cells:affected, excerpt:safeFocused.slice(0,6000), parser_version:PARSER_VERSION, structured_payload:structured, status:"pending" }).select("id,candidate_type,priority").single();
         if (!error&&data) { candidate=data; candidates++; }
       }
-      if (!candidate && source.source_role==="primary" && (structured.unsupported || safeFocused.trim().length<80)) {
+      if (!candidate && source.source_role==="primary" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length<80)) {
         const {data:existingUnreadable}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_unreadable").eq("new_hash",hash).limit(1);
         if (!existingUnreadable?.length) {
           const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
