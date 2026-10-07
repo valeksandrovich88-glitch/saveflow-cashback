@@ -9,7 +9,7 @@
     const bin=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
     const ds=new DecompressionStream('gzip');
     let html=await new Response(new Blob([bin]).stream().pipeThrough(ds)).text();
-    const patchTag='<script src="/v53-patch.js?v=537"></'+'script><script src="/theme-v54.js?v=542"></'+'script><script src="/brand-registry-v56.js?v=564"></'+'script><script src="/global-cloud-v57.js?v=573"></'+'script><script src="/bank-assets-1.js?v=601"></'+'script><script src="/bank-assets-2.js?v=601"></'+'script><script src="/bank-assets-3.js?v=601"></'+'script><script src="/bank-assets-4.js?v=601"></'+'script><script src="/logo-text-v59.js?v=596"></'+'script>';
+    const patchTag='<script src="/v53-patch.js?v=537"></'+'script><script src="/theme-v54.js?v=542"></'+'script><script src="/brand-registry-v56.js?v=564"></'+'script><script src="/global-cloud-v57.js?v=573"></'+'script><script src="/bank-assets-1.js?v=601"></'+'script><script src="/bank-assets-2.js?v=601"></'+'script><script src="/bank-assets-3.js?v=601"></'+'script><script src="/bank-assets-4.js?v=601"></'+'script><script src="/logo-text-v59.js?v=602"></'+'script>';
     html=html.replace('</body>',patchTag+'</body>');
     document.open();
     document.write(html);
