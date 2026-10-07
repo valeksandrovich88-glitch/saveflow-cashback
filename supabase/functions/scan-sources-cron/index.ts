@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 15;
+const PARSER_VERSION = 16;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -407,8 +407,14 @@ Deno.serve(async (req) => {
     for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
       const page = await pdf.getPage(pageNo);
       const content = await page.getTextContent();
-      const line = (content.items || []).map((item: any) => typeof item?.str === "string" ? item.str : "").filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-      if (line) { pages.push(line); chars += line.length + 1; }
+      let pageText = "";
+      for (const item of (content.items || []) as any[]) {
+        const str = typeof item?.str === "string" ? item.str : "";
+        if (!str) continue;
+        pageText += str + (item?.hasEOL ? "\n" : " ");
+      }
+      pageText = pageText.split(/\n+/).map((line) => line.replace(/[ \t]+/g, " ").trim()).filter(Boolean).join("\n");
+      if (pageText) { pages.push(pageText); chars += pageText.length + 1; }
       if (chars >= 180_000) break;
     }
     return pages.join("\n");
@@ -445,7 +451,7 @@ async function loadSource(source: any) {
   async function scanOne(source:any) {
     const oldHash=source.last_hash||null, sourceFingerprintVersion=Number(source.fingerprint_version||0);
     try {
-      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/\s+/g," ").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
+      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
       let structured=extractStructured(source, focused, pageTitle);
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
