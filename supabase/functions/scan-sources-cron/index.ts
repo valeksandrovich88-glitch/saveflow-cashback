@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 9;
+const PARSER_VERSION = 10;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -356,13 +356,15 @@ Deno.serve(async (req) => {
 
   async function loadSource(source: any) {
     let directError: unknown = null;
+    let blockedDirect: { status: number; raw: string; transport: string } | null = null;
     try {
       const res = await fetch(source.url, { redirect:"follow", headers:{ "User-Agent":BROWSER_UA, "Accept":"text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", "Accept-Language":"uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7", "Cache-Control":"no-cache", "Pragma":"no-cache" }, signal:AbortSignal.timeout(15_000) });
-      const raw=await res.text(); if (res.ok) return { status:res.status, raw, transport:"edge_fetch" }; if (detectAccessBlock(raw)) return { status:res.status, raw, transport:"edge_fetch_blocked" }; directError=new Error(`HTTP ${res.status}`);
+      const raw=await res.text(); if (res.ok) return { status:res.status, raw, transport:"edge_fetch" }; if (detectAccessBlock(raw)) blockedDirect={ status:res.status, raw, transport:"edge_fetch_blocked" }; directError=new Error(`HTTP ${res.status}`);
     } catch(e) { directError=e; }
     const { data, error } = await service.rpc("scanner_fetch_source", { p_source_id: source.id });
     const row=Array.isArray(data)?data[0]:data;
     if (!error && row) { const fallbackRaw=String(row.content||""); if (Number(row.status)>=200 && Number(row.status)<300) return { status:Number(row.status), raw:fallbackRaw, transport:"db_http_fallback" }; if (detectAccessBlock(fallbackRaw)) return { status:Number(row.status), raw:fallbackRaw, transport:"db_http_fallback_blocked" }; }
+    if (blockedDirect) return blockedDirect;
     const f=error?.message||(row?`HTTP ${row.status}`:"Fallback returned no data"); const d=directError instanceof Error?directError.message:String(directError||"Direct fetch failed"); throw new Error(`${d}; fallback: ${f}`);
   }
 
