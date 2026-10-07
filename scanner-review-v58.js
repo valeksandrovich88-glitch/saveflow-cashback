@@ -248,7 +248,9 @@
     const limits=p.limits||{};
     const affected=Array.isArray(c.affected_cells)?c.affected_cells:[];
     const affectedShown=affected.slice(0,8);
-    const affectedAssessed=affectedShown.map(x=>({cell:x,verdict:assessAffected(x,items,categoryPool)}));
+    const allAffectedAssessed=affected.map(x=>({cell:x,verdict:assessAffected(x,items,categoryPool)}));
+    const affectedAssessed=allAffectedAssessed.slice(0,8);
+    const exactMatchCount=allAffectedAssessed.filter(x=>x.verdict.cls==='match').length;
     const reference=c.source_role==='reference'||review.reference_only;
     const classes=['sf-candidate',c.priority==='high'?'high':'',c.priority==='low'?'low':''].filter(Boolean).join(' ');
     const sourceLink=src.url?`<a class="sf-source-link" href="${esc(src.url)}" target="_blank" rel="noopener">Відкрити джерело ↗</a>`:'';
@@ -286,7 +288,8 @@
         <div class="sf-note">${esc(autoNote)}</div>
         <div class="sf-candidate-actions">
           ${sourceLink}
-          ${c.status==='pending'?'<button class="sf-scan-btn primary" data-review="reviewed">Позначити переглянутим</button><button class="sf-scan-btn danger" data-review="rejected">Відхилити</button>':''}
+          ${c.status==='pending'&&c.candidate_type==='reference_to_official_review'&&exactMatchCount?`<button class="sf-scan-btn primary" data-confirm-official>${exactMatchCount===1?'Підтвердити 1 збіг офіційно':`Підтвердити ${exactMatchCount} збігів офіційно`}</button>`:''}
+          ${c.status==='pending'?'<button class="sf-scan-btn" data-review="reviewed">Позначити переглянутим</button><button class="sf-scan-btn danger" data-review="rejected">Відхилити</button>':''}
         </div>
       </article>`;
   }
@@ -331,6 +334,50 @@
     }finally{state.busy=false}
   }
 
+  async function confirmOfficialMatches(id){
+    if(!isAdmin())return;
+    const c=client(), uid=session()?.user?.id;
+    if(!c||!uid)return;
+    const candidate=state.candidates.find(x=>String(x.id)===String(id));
+    if(!candidate||candidate.status!=='pending'||candidate.candidate_type!=='reference_to_official_review')return;
+    const src=state.sources[candidate.source_id]||{};
+    if(!src.url)return;
+    const p=candidate.structured_payload||{};
+    const items=Array.isArray(p.items)?p.items:[];
+    const pool=Array.isArray(p.category_pool)?p.category_pool:[];
+    const affected=Array.isArray(candidate.affected_cells)?candidate.affected_cells:[];
+    const assessed=affected.map(cell=>({cell,verdict:assessAffected(cell,items,pool)}));
+    const matches=assessed.filter(x=>x.verdict.cls==='match').map(x=>x.cell);
+    if(!matches.length){alert('Немає точних збігів, які можна безпечно підтвердити.');return;}
+    const card=document.querySelector(`[data-candidate-id="${CSS.escape(String(id))}"]`);
+    card?.querySelectorAll('button').forEach(b=>b.disabled=true);
+    try{
+      const today=new Date().toISOString().slice(0,10);
+      for(const cell of matches){
+        const {data,error}=await c.from('scanner_matrix_index')
+          .update({source_tier:'official',source_url:src.url,checked_on:today,updated_at:new Date().toISOString()})
+          .eq('cell_key',cell.cell_key)
+          .eq('source_tier','reference')
+          .eq('current_value',cell.current_value)
+          .select('cell_key');
+        if(error)throw error;
+        if(!data?.length)throw new Error(`Комірка "${cell.cell_key}" змінилася після скану. Онови дані й перевір ще раз.`);
+      }
+      const matchKeys=new Set(matches.map(x=>x.cell_key));
+      const unresolved=affected.filter(x=>!matchKeys.has(x.cell_key));
+      const note=`Офіційно підтверджено без зміни значень: ${matches.length} комірок. Джерело: ${src.url}`;
+      const patch=unresolved.length
+        ? {affected_cells:unresolved,review_note:note,updated_at:new Date().toISOString()}
+        : {affected_cells:[],status:'reviewed',reviewed_by:uid,reviewed_at:new Date().toISOString(),review_note:note,updated_at:new Date().toISOString()};
+      const {error:ce}=await c.from('scanner_candidates').update(patch).eq('id',id);
+      if(ce)throw ce;
+      await load();
+    }catch(e){
+      console.warn('SaveFlow confirm official evidence',e);
+      alert('Не вдалося підтвердити офіційне джерело: '+(e?.message||e));
+      card?.querySelectorAll('button').forEach(b=>b.disabled=false);
+    }
+  }
   async function review(id,status){
     if(!isAdmin()||!['reviewed','rejected'].includes(status))return;
     const c=client(), uid=session()?.user?.id; if(!c||!uid)return;
@@ -380,6 +427,11 @@
     if(action==='run')runNow();
     const tab=e.target.closest('[data-scan-tab]')?.dataset.scanTab;
     if(tab){state.tab=tab;render()}
+    const confirmBtn=e.target.closest('[data-confirm-official]');
+    if(confirmBtn){
+      const card=confirmBtn.closest('[data-candidate-id]');
+      if(card)confirmOfficialMatches(card.dataset.candidateId);
+    }
     const btn=e.target.closest('[data-review]');
     if(btn){
       const card=btn.closest('[data-candidate-id]');
