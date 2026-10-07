@@ -41,8 +41,8 @@
     .top-nav button:hover{background:rgba(235,246,236,.19)!important;border-color:rgba(235,246,236,.22)!important}
     .top-nav button.active{background:rgba(232,244,233,.88)!important;color:#183120!important;border-color:rgba(232,244,233,.72)!important}
 
-    main>h1,.section-title{color:#f4f8f4!important;text-shadow:0 1px 2px rgba(0,0,0,.13)}
-    .section-kicker,.footnotes{color:rgba(235,244,237,.88)!important}
+    main>h1,.section-title{color:#13271b!important;text-shadow:none!important}
+    .section-kicker,.footnotes,.footnotes div{color:#13271b!important}
 
     /* Cards no longer have their own opaque fill: the page gradient continues through them. */
     .matrix-card,
