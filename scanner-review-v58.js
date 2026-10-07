@@ -2,7 +2,7 @@
   const ID='saveflowScannerReviewV58';
   if(document.getElementById(ID)) return;
 
-  const state={open:false,tab:'pending',busy:false,candidates:[],sources:{},runs:[]};
+  const state={open:false,tab:'pending',busy:false,candidates:[],sources:{},runs:[],snapshots:[],latestSnapshots:{}};
   const esc=(s)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtDate=(s)=>{
     if(!s)return '—';
@@ -34,7 +34,7 @@
     .sf-scan-btn:hover{background:#edf5ef}.sf-scan-btn.primary{background:#235d3e;color:#fff;border-color:#235d3e}.sf-scan-btn.danger{color:#8e2f2f}
     .sf-scan-btn:disabled{opacity:.52;cursor:wait}
     .sf-scan-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:12px 18px}
-    .sf-scan-stat{padding:10px 11px;border:1px solid #d5e2d8;border-radius:12px;background:#eef6f0}.sf-scan-stat b{display:block;font-size:16px}.sf-scan-stat span{font-size:9px;color:#6c7b70}
+    .sf-scan-stat{padding:10px 11px;border:1px solid #d5e2d8;border-radius:12px;background:#eef6f0}.sf-scan-stat b{display:block;font-size:16px}.sf-scan-stat span{font-size:9px;color:#6c7b70}.sf-scan-overview{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:9px;padding:0 18px 12px}.sf-overview-card{border:1px solid #d3e0d6;border-radius:13px;background:#f2f7f3;padding:11px}.sf-overview-title{font:800 11px/1.2 system-ui;margin-bottom:8px}.sf-health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.sf-health-box{padding:8px;border-radius:9px;background:#e8f1ea}.sf-health-box b{display:block;font-size:13px}.sf-health-box span{font-size:8px;color:#68786d}.sf-health-note{margin-top:7px;font-size:8px;line-height:1.4;color:#68776c}.sf-rollover-list{display:grid;gap:5px}.sf-rollover-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:9px;background:#eaf2ec;font-size:9px}.sf-rollover-item b{font-size:9px}.sf-rollover-item span{white-space:nowrap;color:#5f7065}.sf-rollover-item.expired{background:#f8e5e5}.sf-rollover-item.soon{background:#fff0d8}.sf-rollover-empty{font-size:9px;color:#718077;padding:6px 1px}
     .sf-scan-tabs{display:flex;gap:6px;padding:0 18px 10px}.sf-scan-tab{border:0;border-radius:9px;padding:7px 10px;background:#e7efe9;color:#4c6253;font:750 10px system-ui;cursor:pointer}
     .sf-scan-tab.active{background:#294f39;color:white}
     .sf-scan-body{overflow:auto;padding:0 18px 18px;display:grid;gap:10px}
@@ -56,7 +56,7 @@
     .sf-runline{padding:0 18px 12px;color:#607065;font-size:9px}
     @media(max-width:760px){
       .sf-scan-review-backdrop{padding:8px}.sf-scan-review{max-height:95vh;border-radius:14px}.sf-scan-head{padding:14px;flex-direction:column}.sf-scan-actions{justify-content:flex-start}
-      .sf-scan-summary{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px 14px}.sf-scan-tabs{padding:0 14px 10px}.sf-scan-body{padding:0 14px 14px}
+      .sf-scan-summary{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px 14px}.sf-scan-overview{grid-template-columns:1fr;padding:0 14px 10px}.sf-scan-tabs{padding:0 14px 10px}.sf-scan-body{padding:0 14px 14px}
       .sf-structured-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-item{grid-template-columns:1fr auto}.sf-item .dates{grid-column:1/-1}
     }
   `;
@@ -75,6 +75,7 @@
         </div>
       </div>
       <div class="sf-scan-summary" id="sfScanSummary"></div>
+      <div class="sf-scan-overview"><div class="sf-overview-card" id="sfScanHealth"></div><div class="sf-overview-card" id="sfScanRollover"></div></div>
       <div class="sf-scan-tabs">
         <button class="sf-scan-tab active" data-scan-tab="pending">На перевірці</button>
         <button class="sf-scan-tab" data-scan-tab="all">Останні</button>
@@ -126,6 +127,63 @@
       <div class="sf-scan-stat"><b>${run.failed_sources??0}</b><span>помилки останнього скану</span></div>`;
     const rl=document.getElementById('sfScanRunline');
     if(rl) rl.textContent=run.started_at?`Останній скан: ${fmtDate(run.started_at)} · ${run.status||'—'} · джерел ${run.total_sources??'—'} · змін ${run.changed_sources??0}`:'Сканів ще немає.';
+  }
+
+  function renderOverview(){
+    const sources=Object.values(state.sources).filter(x=>x.enabled!==false&&x.source_role==='primary');
+    const manual=sources.filter(x=>x.publish_policy==='manual_only'||x.data_mode==='dynamic'||x.data_mode==='personalized');
+    const issues=sources.filter(src=>{
+      if(src.last_error)return true;
+      if(src.publish_policy==='manual_only'||src.data_mode==='dynamic'||src.data_mode==='personalized')return false;
+      const snap=state.latestSnapshots[src.id];
+      return !!snap?.structured_payload?.unsupported;
+    });
+    const healthy=Math.max(0,sources.length-manual.length-issues.length);
+    const healthEl=document.getElementById('sfScanHealth');
+    if(healthEl){
+      const issueNames=issues.slice(0,4).map(src=>{
+        const p=state.latestSnapshots[src.id]?.structured_payload||{};
+        return `${src.bank||src.publisher||src.id}: ${healthReason(p.reason)}`;
+      });
+      healthEl.innerHTML=`
+        <div class="sf-overview-title">Стан офіційних джерел</div>
+        <div class="sf-health-grid">
+          <div class="sf-health-box"><b>${sources.length}</b><span>офіційних джерел</span></div>
+          <div class="sf-health-box"><b>${healthy}</b><span>читаються автоматично</span></div>
+          <div class="sf-health-box"><b>${manual.length}</b><span>ручні / персональні</span></div>
+          <div class="sf-health-box"><b>${issues.length}</b><span>потребують уваги</span></div>
+        </div>
+        ${issueNames.length?`<div class="sf-health-note">${issueNames.map(esc).join('<br>')}</div>`:'<div class="sf-health-note">Критичних проблем у джерелах, які мають читатися автоматично, немає.</div>'}`;
+    }
+
+    const now=new Date(); now.setHours(0,0,0,0);
+    const entries=[];
+    for(const src of sources){
+      if(src.publish_policy==='manual_only'||src.data_mode==='dynamic'||src.data_mode==='personalized')continue;
+      const p=state.latestSnapshots[src.id]?.structured_payload||{};
+      const seen=new Set();
+      const add=(name,date)=>{
+        if(!date)return;
+        const d=new Date(String(date)+'T00:00:00');
+        if(Number.isNaN(d.getTime()))return;
+        const key=`${date}|${name}`; if(seen.has(key))return; seen.add(key);
+        entries.push({source_id:src.id,bank:src.bank||src.publisher||src.id,name:name||src.purpose||'Пропозиція',date:String(date),ts:d.getTime()});
+      };
+      add(src.purpose||'Джерело',p.valid_to);
+      (Array.isArray(p.items)?p.items:[]).forEach(item=>add(item.name||item.category||item.partner||src.purpose,item.valid_to));
+    }
+    entries.sort((a,b)=>a.ts-b.ts);
+    const roll=document.getElementById('sfScanRollover');
+    if(roll){
+      const shown=entries.filter((x,i,arr)=>arr.findIndex(y=>y.bank===x.bank&&y.name===x.name&&y.date===x.date)===i).slice(0,6);
+      const rows=shown.map(x=>{
+        const days=Math.ceil((x.ts-now.getTime())/86400000);
+        const cls=days<0?'expired':days<=14?'soon':'';
+        const suffix=days<0?`прострочено ${Math.abs(days)} дн.`:days===0?'закінчується сьогодні':`через ${days} дн.`;
+        return `<div class="sf-rollover-item ${cls}"><div><b>${esc(x.bank)}</b><div>${esc(x.name)}</div></div><span>${esc(fmtShort(x.date))}<br>${esc(suffix)}</span></div>`;
+      }).join('');
+      roll.innerHTML=`<div class="sf-overview-title">Rollover / найближчі строки</div>${rows?`<div class="sf-rollover-list">${rows}</div>`:'<div class="sf-rollover-empty">У прочитаних офіційних джерелах немає визначених строків завершення.</div>'}`;
+    }
   }
 
   function itemHtml(item){
@@ -185,6 +243,7 @@
 
   function render(){
     renderSummary();
+    renderOverview();
     document.querySelectorAll('.sf-scan-tab').forEach(b=>b.classList.toggle('active',b.dataset.scanTab===state.tab));
     const body=document.getElementById('sfScanBody');
     if(!body)return;
@@ -202,15 +261,19 @@
     const c=client(); if(!c)return;
     state.busy=true;
     try{
-      const [{data:cands,error:ce},{data:sources,error:se},{data:runs,error:re}]=await Promise.all([
+      const [{data:cands,error:ce},{data:sources,error:se},{data:runs,error:re},{data:snaps,error:sne}]=await Promise.all([
         c.from('scanner_candidates').select('*').order('created_at',{ascending:false}).limit(100),
-        c.from('scanner_sources').select('id,bank,publisher,url,purpose,source_role,data_mode,publish_policy,enabled'),
-        c.from('scanner_runs').select('id,trigger_kind,started_at,finished_at,status,total_sources,changed_sources,failed_sources,candidates_created').order('started_at',{ascending:false}).limit(10)
+        c.from('scanner_sources').select('id,bank,publisher,url,purpose,source_role,data_mode,publish_policy,enabled,last_checked_at,last_http_status,last_error'),
+        c.from('scanner_runs').select('id,trigger_kind,started_at,finished_at,status,total_sources,changed_sources,failed_sources,candidates_created').order('started_at',{ascending:false}).limit(10),
+        c.from('scanner_snapshots').select('source_id,fetched_at,http_status,title,text_excerpt,parser_version,structured_payload').order('fetched_at',{ascending:false}).limit(250)
       ]);
-      if(ce)throw ce;if(se)throw se;if(re)throw re;
+      if(ce)throw ce;if(se)throw se;if(re)throw re;if(sne)throw sne;
       state.candidates=cands||[];
       state.sources=Object.fromEntries((sources||[]).map(x=>[x.id,x]));
       state.runs=runs||[];
+      state.snapshots=snaps||[];
+      state.latestSnapshots={};
+      for(const snap of state.snapshots){if(!state.latestSnapshots[snap.source_id])state.latestSnapshots[snap.source_id]=snap;}
       render();
     }catch(e){
       console.warn('SaveFlow scanner review load',e);
