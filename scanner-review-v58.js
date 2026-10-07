@@ -44,7 +44,7 @@
     .sf-candidate-top{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
     .sf-candidate-title{font:800 13px/1.25 system-ui;margin-bottom:4px}.sf-candidate-meta{font:600 9px/1.4 system-ui;color:#718077}
     .sf-chip-row{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.sf-chip{display:inline-flex;padding:4px 7px;border-radius:999px;background:#e7f0e9;color:#365542;font:750 9px/1 system-ui}
-    .sf-chip.high{background:#f8e7d6;color:#824919}.sf-chip.expired{background:#f9dddd;color:#8d3030}.sf-chip.reference{background:#e6eaf4;color:#465577}
+    .sf-chip.high{background:#f8e7d6;color:#824919}.sf-chip.expired{background:#f9dddd;color:#8d3030}.sf-chip.reference{background:#e6eaf4;color:#465577}.sf-chip.unavailable{background:#fff0d8;color:#8b5318}
     .sf-structured{margin-top:10px;display:grid;gap:7px}.sf-structured-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
     .sf-field{border-radius:10px;background:#eef4ef;padding:7px 8px;min-width:0}.sf-field span{display:block;font-size:8px;color:#738078;margin-bottom:3px}.sf-field b{display:block;font-size:10px;overflow:hidden;text-overflow:ellipsis}
     .sf-items{display:grid;gap:5px}.sf-item{display:grid;grid-template-columns:minmax(150px,1fr) auto auto;gap:8px;align-items:center;padding:7px 8px;background:#edf4ee;border-radius:9px;font-size:9px}
@@ -98,12 +98,21 @@
 
   const humanType=(c)=>{
     if(c.candidate_type==='official_source_expired') return 'Офіційна пропозиція завершилася';
+    if(c.candidate_type==='official_source_unreadable') return 'Офіційне джерело недоступне сканеру';
     if(c.candidate_type==='dynamic_or_personalized_source_changed') return 'Зміни у персоналізованому джерелі';
     if(c.candidate_type==='reference_to_official_review') return 'Є офіційне джерело для перевірки';
     if(c.candidate_type==='reference_change_signal') return 'Сигнал з довідкового джерела';
     return 'Зміни в офіційному джерелі';
   };
   const statusLabel=(s)=>({pending:'На перевірці',reviewed:'Переглянуто',rejected:'Відхилено'}[s]||s||'—');
+  const healthReason=(reason)=>({
+    antibot_incapsula:'Incapsula / Imperva блокує серверний доступ до офіційного сайту',
+    antibot_challenge:'Anti-bot challenge блокує серверний доступ до офіційного сайту',
+    access_denied:'Офіційний сайт повернув Access Denied',
+    binary_or_pdf_text:'Джерело повертає PDF або бінарний документ, який цей парсер не читає як сторінку',
+    empty_or_too_short_excerpt:'Офіційна сторінка повернула замало доступного тексту',
+    unsupported_content:'Формат джерела поки не підтримується'
+  }[reason]||reason||'Джерело не вдалося коректно прочитати');
 
   function renderSummary(){
     const run=state.runs[0]||{};
@@ -129,6 +138,7 @@
     const p=c.structured_payload||{};
     const review=p.review_policy||{};
     const expiry=p.expiry_review||{};
+    const health=p.source_health||{};
     const items=Array.isArray(p.items)?p.items:[];
     const shown=items.slice(0,8);
     const limits=p.limits||{};
@@ -149,6 +159,7 @@
           <div class="sf-chip-row">
             <span class="sf-chip ${c.priority==='high'?'high':''}">${esc(c.priority||'normal')}</span>
             ${c.candidate_type==='official_source_expired'?'<span class="sf-chip expired">expired</span>':''}
+            ${c.candidate_type==='official_source_unreadable'?'<span class="sf-chip unavailable">source unavailable</span>':''}
             ${reference?'<span class="sf-chip reference">reference only</span>':''}
           </div>
         </div>
@@ -160,6 +171,7 @@
             <div class="sf-field"><span>Комірок матриці</span><b>${affected.length}</b></div>
           </div>
           ${expiry.expired_on?`<div class="sf-evidence">Строк дії завершився <b>${esc(fmtShort(expiry.expired_on))}</b>. Сканер лише створив задачу на перевірку; автоматичного видалення немає.</div>`:''}
+          ${c.candidate_type==='official_source_unreadable'?`<div class="sf-evidence"><b>Чому не читається:</b> ${esc(healthReason(health.reason||p.reason))}${health.response_bytes!=null?` · відповідь ${esc(health.response_bytes)} байт`:''}${health.transport?` · ${esc(health.transport)}`:''}. Дані з такого джерела не застосовуються автоматично.</div>`:''}
           ${shown.length?`<div class="sf-items">${shown.map(itemHtml).join('')}${items.length>shown.length?`<div class="sf-evidence">Ще ${items.length-shown.length} позицій приховано у короткому перегляді.</div>`:''}</div>`:''}
           ${c.excerpt?`<details><summary style="font-size:9px;cursor:pointer;color:#52665a">Фрагмент джерела</summary><div class="sf-evidence" style="margin-top:6px;white-space:pre-wrap">${esc(String(c.excerpt).slice(0,1800))}</div></details>`:''}
         </div>
