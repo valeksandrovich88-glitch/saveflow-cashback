@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 22;
+const PARSER_VERSION = 23;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -707,6 +707,29 @@ async function loadSource(source: any) {
         last_error: null,
         fingerprint_version: FINGERPRINT_VERSION,
       }).eq("id", source.id);
+
+      // Keep an existing review task aligned with the newest parser output even when
+      // the source content hash itself did not change.
+      const { data: pendingEvidence } = await service.from("scanner_candidates")
+        .select("id,structured_payload")
+        .eq("source_id", source.id)
+        .eq("candidate_type", "reference_to_official_review")
+        .eq("new_hash", hash)
+        .eq("status", "pending")
+        .limit(1);
+      if (pendingEvidence?.length) {
+        const prev = pendingEvidence[0].structured_payload || {};
+        const refreshedPayload = {
+          ...structured,
+          ...(prev.bootstrap_review ? { bootstrap_review: prev.bootstrap_review } : {}),
+        };
+        await service.from("scanner_candidates").update({
+          excerpt: safeFocused.slice(0, 6_000),
+          parser_version: PARSER_VERSION,
+          structured_payload: refreshedPayload,
+          updated_at: new Date().toISOString(),
+        }).eq("id", pendingEvidence[0].id);
+      }
 
       let candidate: any = null;
       if (isChanged) {
