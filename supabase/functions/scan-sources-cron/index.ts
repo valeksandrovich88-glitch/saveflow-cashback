@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 20;
+const PARSER_VERSION = 21;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -181,26 +181,35 @@ const DEFINED_CATEGORY_POOL = [
   ["Транспорт", /(?:^|\n)Транспорт\s*\(/iu],
   ["Duty Free", /(?:^|\n)Duty\s*Free\s*\(/iu],
 ];
+const RAIF_MCC_CATEGORIES = [
+  "Duty Free","Quasi Cash","Авіаквитки","Аврора та інші мультимаркети","Автосервіси","АЗС","Аптеки",
+  "Благодійність","Готелі","Грошові перекази","Доставка","Ігри та застосунки","Кафе та ресторани",
+  "Квіти","Кіно та театри","Книги","Комунальні послуги","Краса та догляд","Маркетплейси",
+  "Медичні заклади","Одяг та взуття","Операції в банкоматі","Оренда авто","Побутова техніка",
+  "Прикраси та подарунки","Продукти та супермаркети","Розваги","Спорт","Страхування","Таксі",
+  "Товари для дітей","Транспорт","Усе для дому","Усе для тварин","Хімчистка","Поповнення мобільного телефону"
+];
+const IZI_MCC_CATEGORIES = [
+  "Одяг та взуття","Тварини","Авто та азс","Продукти і супермаркети","Медицина і косметологія",
+  "Кафе і ресторани","Книги","Квіти","Таксі і транспорт","Подорожі","Спорт і розваги",
+  "Ремонт та будівництво","Електроніка та побутова техніка","Фастфуд","Кінотеатри","Різне"
+];
+function extractKnownSourceCategoryPool(text, sourceId) {
+  const raw = String(text || "");
+  const appendixIndex = raw.search(/Додаток\s*1|Назва\s+категорії|Категорія\s+(?:перелік\s*)?(?:МСС|MCC)/iu);
+  if (appendixIndex < 0) return [];
+  const normalized = raw.slice(appendixIndex).replace(/\s+/g," ").toLocaleLowerCase("uk-UA");
+  const wanted = sourceId==="raif-cashback" ? RAIF_MCC_CATEGORIES
+    : sourceId==="izibank-cashback-rules" ? IZI_MCC_CATEGORIES
+    : null;
+  if (!wanted) return [];
+  return wanted.filter(name=>normalized.includes(name.toLocaleLowerCase("uk-UA")));
+}
 function extractMccTableCategoryPool(text) {
   const raw = String(text || "");
   const appendixIndex = raw.search(/Додаток\s*1[^\n]*(?:МСС|MCC)|Категорія\s+(?:перелік\s*)?(?:МСС|MCC)/iu);
   if (appendixIndex < 0) return [];
   const appendixRaw = raw.slice(appendixIndex);
-  const normalizedAppendix = appendixRaw.replace(/\s+/g," ").toLocaleLowerCase("uk-UA");
-  const knownCategories = [
-    "Duty Free","Quasi Cash","Авіаквитки","Аврора та інші мультимаркети","Автосервіси","АЗС","Аптеки",
-    "Благодійність","Готелі","Грошові перекази","Доставка","Ігри та застосунки","Кафе та ресторани",
-    "Квіти","Кіно та театри","Книги","Комунальні послуги","Краса та догляд","Маркетплейси",
-    "Медичні заклади","Одяг та взуття","Операції в банкоматі","Оренда авто","Побутова техніка",
-    "Прикраси та подарунки","Продукти та супермаркети","Розваги","Спорт","Страхування","Таксі",
-    "Товари для дітей","Транспорт","Усе для дому","Усе для тварин","Хімчистка","Поповнення мобільного телефону",
-    "Тварини","Авто та азс","Продукти і супермаркети","Медицина і косметологія","Кафе і ресторани",
-    "Таксі і транспорт","Подорожі","Спорт і розваги","Ремонт та будівництво","Електроніка та побутова техніка",
-    "Фастфуд","Кінотеатри","Різне"
-  ];
-  const known = knownCategories.filter(name=>normalizedAppendix.includes(name.toLocaleLowerCase("uk-UA")));
-  if (known.length >= 3) return known;
-
   const lines = appendixRaw.split(/\n+/).map(compactLabel).filter(Boolean);
   const pool = [];
   const seen = new Set();
@@ -221,13 +230,13 @@ function extractMccTableCategoryPool(text) {
   let pendingLabels = [];
   for (let i = 0; i < lines.length && i < 260; i++) {
     const line = lines[i];
-    const row = line.match(/^([\p{L}][\p{L}\p{M}\s’'&+./()\-]{1,79}?)\s+((?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,160})(?:\s|$)/u);
+    const row = line.match(/^([\p{L}][\p{L}\p{M}\s’'&+./()\-]{1,79}?)\s+((?:0\d{3}|[1-9]\d{3})(?:[\s,;\-–]+(?:0\d{3}|[1-9]\d{3})){0,160})(?:\s|$)/u);
     if (row) {
       add(row[1]);
       pendingLabels = [];
       continue;
     }
-    const numericOnly = /^(?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,200}$/u.test(line);
+    const numericOnly = /^(?:0\d{3}|[1-9]\d{3})(?:[\s,;\-–]+(?:0\d{3}|[1-9]\d{3})){0,200}$/u.test(line);
     if (numericOnly) {
       if (pendingLabels.length) add(pendingLabels.join(" "));
       pendingLabels = [];
@@ -243,8 +252,10 @@ function extractMccTableCategoryPool(text) {
   }
   return pool.length >= 3 ? pool : [];
 }
-function extractDefinedCategoryPool(text) {
+function extractDefinedCategoryPool(text, sourceId="") {
   const raw = String(text || "");
+  const sourcePool = extractKnownSourceCategoryPool(raw, sourceId);
+  if (sourcePool.length >= 3) return sourcePool;
   const pool = [];
   for (const [name, re] of DEFINED_CATEGORY_POOL) {
     if (re.test(raw)) pool.push(name);
@@ -520,7 +531,7 @@ async function loadSource(source: any) {
   async function scanOne(source:any) {
     const oldHash=source.last_hash||null, sourceFingerprintVersion=Number(source.fingerprint_version||0);
     try {
-      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
+      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text,source.id), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
       let structured=extractStructured(source, focused, pageTitle);
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
