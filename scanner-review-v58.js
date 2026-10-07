@@ -22,8 +22,8 @@
   const st=document.createElement('style');
   st.id=ID;
   st.textContent=`
-    #scannerReviewToggle{display:none}
-    html[data-saveflow-role="admin"] #scannerReviewToggle{display:inline-flex}
+    #scannerReviewToggle{display:none!important}
+    body.site-editing #scannerReviewToggle{display:inline-flex!important}
     .sf-scan-review-backdrop{position:fixed;inset:0;background:rgba(5,16,10,.48);backdrop-filter:blur(5px);z-index:9997;display:none;align-items:center;justify-content:center;padding:22px}
     .sf-scan-review-backdrop.show{display:flex}
     .sf-scan-review{width:min(1100px,96vw);max-height:91vh;overflow:hidden;background:rgba(247,251,247,.98);border:1px solid rgba(168,193,174,.8);border-radius:18px;box-shadow:0 28px 80px rgba(0,0,0,.28);display:flex;flex-direction:column;color:#14251a}
@@ -87,15 +87,29 @@
 
   let toggle=document.getElementById('scannerReviewToggle');
   if(!toggle){
-    toggle=document.createElement('button');
-    toggle.id='scannerReviewToggle';
-    toggle.type='button';
-    toggle.className='matrix-btn';
-    toggle.textContent='Сканер';
-    toggle.title='Центр перевірки сканера';
-    const actions=document.querySelector('#siteAdminBar .site-admin-actions')||document.querySelector('#siteAdminBar');
-    actions?.prepend(toggle);
+    const legacy=document.getElementById('scannerToggle');
+    if(legacy){
+      toggle=legacy.cloneNode(true);
+      toggle.id='scannerReviewToggle';
+      toggle.type='button';
+      toggle.className=legacy.className||'matrix-btn';
+      toggle.textContent='Сканер';
+      toggle.title='Центр перевірки сканера';
+      legacy.replaceWith(toggle);
+    }else{
+      toggle=document.createElement('button');
+      toggle.id='scannerReviewToggle';
+      toggle.type='button';
+      toggle.className='matrix-btn';
+      toggle.textContent='Сканер';
+      toggle.title='Центр перевірки сканера';
+      const actions=document.querySelector('#siteAdminBar .site-admin-actions')||document.querySelector('#siteAdminBar');
+      actions?.prepend(toggle);
+    }
   }
+  document.querySelectorAll('#siteAdminBar button').forEach(btn=>{
+    if(btn!==toggle && String(btn.textContent||'').trim()==='Сканер') btn.remove();
+  });
 
   const humanType=(c)=>{
     if(c.candidate_type==='official_source_expired') return 'Офіційна пропозиція завершилася';
@@ -413,7 +427,7 @@
   }
 
   function open(){
-    if(!isAdmin())return;
+    if(!isAdminMode())return;
     state.open=true;backdrop.classList.add('show');load();
   }
   function close(){state.open=false;backdrop.classList.remove('show')}
@@ -440,11 +454,18 @@
   });
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.open)close()});
 
+  function isAdminMode(){
+    return isAdmin() && document.body.classList.contains('site-editing');
+  }
   function syncVisibility(){
-    if(toggle)toggle.style.display=isAdmin()?'inline-flex':'none';
-    if(!isAdmin()&&state.open)close();
+    if(toggle)toggle.style.display=isAdminMode()?'inline-flex':'none';
+    if(!isAdminMode()&&state.open)close();
+    document.querySelectorAll('#siteAdminBar button').forEach(btn=>{
+      if(btn!==toggle && String(btn.textContent||'').trim()==='Сканер') btn.remove();
+    });
   }
   window.addEventListener('saveflow-auth-change',()=>setTimeout(syncVisibility,0));
   new MutationObserver(syncVisibility).observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
+  new MutationObserver(syncVisibility).observe(document.body,{attributes:true,attributeFilter:['class'],childList:true,subtree:true});
   setTimeout(syncVisibility,700);
 })();
