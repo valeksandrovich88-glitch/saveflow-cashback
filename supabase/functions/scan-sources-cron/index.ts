@@ -1,9 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 14;
+const PARSER_VERSION = 15;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -397,12 +398,42 @@ Deno.serve(async (req) => {
   let changed=0, failed=0, candidates=0;
   const results: unknown[]=[];
 
-  async function loadSource(source: any) {
+  async function extractPdfText(bytes: Uint8Array) {
+  const pdf = await getDocumentProxy(bytes);
+  try {
+    if (pdf.numPages > 320) throw new Error(`PDF has too many pages: ${pdf.numPages}`);
+    const pages: string[] = [];
+    let chars = 0;
+    for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+      const page = await pdf.getPage(pageNo);
+      const content = await page.getTextContent();
+      const line = (content.items || []).map((item: any) => typeof item?.str === "string" ? item.str : "").filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+      if (line) { pages.push(line); chars += line.length + 1; }
+      if (chars >= 180_000) break;
+    }
+    return pages.join("\n");
+  } finally {
+    try { await pdf.destroy(); } catch (_) {}
+  }
+}
+
+async function readFetchedResponse(res: Response) {
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const contentType = String(res.headers.get("content-type") || "");
+  const magic = bytes.length >= 5 ? String.fromCharCode(...bytes.slice(0, 5)) : "";
+  const isPdf = /application\/pdf/i.test(contentType) || magic === "%PDF-";
+  if (isPdf) {
+    const raw = await extractPdfText(bytes);
+    return { raw, responseBytes: bytes.byteLength, documentType: "pdf", contentType };
+  }
+  return { raw: new TextDecoder().decode(bytes), responseBytes: bytes.byteLength, documentType: "html", contentType };
+}
+async function loadSource(source: any) {
     let directError: unknown = null;
-    let blockedDirect: { status: number; raw: string; transport: string } | null = null;
+    let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
     try {
       const res = await fetch(source.url, { redirect:"follow", headers:{ "User-Agent":BROWSER_UA, "Accept":"text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", "Accept-Language":"uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7", "Cache-Control":"no-cache", "Pragma":"no-cache" }, signal:AbortSignal.timeout(15_000) });
-      const raw=await res.text(); if (res.ok) return { status:res.status, raw, transport:"edge_fetch" }; if (detectAccessBlock(raw)) blockedDirect={ status:res.status, raw, transport:"edge_fetch_blocked" }; directError=new Error(`HTTP ${res.status}`);
+      const fetched=await readFetchedResponse(res), raw=fetched.raw; if (res.ok) return { status:res.status, raw, responseBytes:fetched.responseBytes, documentType:fetched.documentType, contentType:fetched.contentType, transport:fetched.documentType==="pdf"?"edge_fetch_pdf":"edge_fetch" }; if (detectAccessBlock(raw)) blockedDirect={ status:res.status, raw, responseBytes:fetched.responseBytes, documentType:fetched.documentType, contentType:fetched.contentType, transport:"edge_fetch_blocked" }; directError=new Error(`HTTP ${res.status}`);
     } catch(e) { directError=e; }
     const { data, error } = await service.rpc("scanner_fetch_source", { p_source_id: source.id });
     const row=Array.isArray(data)?data[0]:data;
@@ -414,8 +445,9 @@ Deno.serve(async (req) => {
   async function scanOne(source:any) {
     const oldHash=source.last_hash||null, sourceFingerprintVersion=Number(source.fingerprint_version||0);
     try {
-      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=new TextEncoder().encode(raw).byteLength, accessBlock=detectAccessBlock(raw), text=cleanText(raw), categoryPool=extractDefinedCategoryPool(text), focused=focusText(text), pageTitle=safeDbText(titleFromHtml(raw)||'')||null;
+      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/\s+/g," ").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
       let structured=extractStructured(source, focused, pageTitle);
+      structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       const safeFocused=safeDbText(focused);
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
