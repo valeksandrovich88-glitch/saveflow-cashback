@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 30;
+const PARSER_VERSION = 32;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -338,6 +338,52 @@ function extractDefinedCategoryPool(text, sourceId="") {
     if(!keys.has(key)){keys.add(key);merged.push(name);}
   }
   return merged.length >= 3 ? merged : [];
+}
+function normalizeCreditDniproStructured(text, structured) {
+  const raw = String(text || "");
+  const start = raw.search(/Пропозиції\s+від\s+партнерів/iu);
+  let partnerLines = [];
+  if (start >= 0) {
+    const tail = raw.slice(start);
+    const stopMatch = tail.slice(1).search(/(?:Завантажуйте|Станьте\s+партнером|Основні\s+умови)/iu);
+    const segment = stopMatch >= 0 ? tail.slice(0, stopMatch + 1) : tail.slice(0, 2200);
+    partnerLines = segment.split(/\n+/).map(compactLabel).filter((line) =>
+      /^\d{1,3}(?:[.,]\d+)?\s*%\s+(?:на|за)\s+/iu.test(line)
+    );
+  }
+  const partnerKeys = new Set(partnerLines.map((x) => x.toLocaleLowerCase("uk-UA")));
+  const existing = Array.isArray(structured?.items) ? structured.items : [];
+  const items = existing.filter((item) => {
+    const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
+    return !evidence.some((line) => partnerKeys.has(compactLabel(line).toLocaleLowerCase("uk-UA")));
+  });
+  const categoryExamples = [
+    "Продукти та харчування",
+    "Медицина",
+    "Авто та АЗС",
+    "Техніка",
+    "Дитячі товари",
+    "Транспорт",
+    "Duty Free"
+  ];
+  const limits = { ...(structured?.limits || {}) };
+  if (limits.max_cashback_uah == null) limits.max_cashback_uah = 500;
+  return {
+    ...structured,
+    items,
+    item_count: items.length,
+    limits,
+    selection: {
+      ...(structured?.selection || {}),
+      max_categories: 4,
+      offered_categories: 8,
+      cadence: "monthly"
+    },
+    max_bank_category_rate_percent: 20,
+    category_examples: categoryExamples,
+    category_examples_source: "official_cashback_page",
+    partner_offer_signals: partnerLines.slice(0, 20)
+  };
 }
 function evidenceNorm(s) {
   return String(s || "").toLowerCase().replace(/[’'`]/g,"").replace(/[^a-zа-яіїєґ0-9]+/giu," ").trim();
@@ -740,7 +786,59 @@ async function readFetchedResponse(res: Response) {
   }
   return { raw: new TextDecoder().decode(bytes), responseBytes: bytes.byteLength, documentType: "html", contentType };
 }
+async function loadMastercardSubscriptionSource() {
+  const origin = "https://bilshe.mastercard.ua";
+  const commonHeaders = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "text/html,application/javascript,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+  };
+  const pageRes = await fetch(origin + "/subscription", { headers: commonHeaders, signal: AbortSignal.timeout(15000) });
+  if (!pageRes.ok) throw new Error("Mastercard subscription page HTTP " + pageRes.status);
+  const pageHtml = await pageRes.text();
+  const indexMatch = pageHtml.match(/<script[^>]+src=["\'](\/assets\/index-[^"\']+\.js)["\']/i);
+  if (!indexMatch) throw new Error("Mastercard main bundle not found");
+  const indexRes = await fetch(new URL(indexMatch[1], origin), { headers: commonHeaders, signal: AbortSignal.timeout(15000) });
+  if (!indexRes.ok) throw new Error("Mastercard main bundle HTTP " + indexRes.status);
+  const indexJs = await indexRes.text();
+  const chunkMatch = indexJs.match(/assets\/PromotionOffersDetails-[A-Za-z0-9_-]+\.js/);
+  if (!chunkMatch) throw new Error("Mastercard promotion details bundle not found");
+  const chunkRes = await fetch(new URL("/" + chunkMatch[0], origin), { headers: commonHeaders, signal: AbortSignal.timeout(15000) });
+  if (!chunkRes.ok) throw new Error("Mastercard promotion bundle HTTP " + chunkRes.status);
+  const chunkJs = await chunkRes.text();
+  const start = chunkJs.indexOf("E0=[");
+  const end = start >= 0 ? chunkJs.indexOf("],D0=", start) : -1;
+  if (start < 0 || end < 0) throw new Error("Mastercard subscription terms block not found");
+  const section = chunkJs.slice(start + 3, end + 1)
+    .replace(/\\n/g, "\n")
+    .replace(/\\\"/g, "\"")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\},\{/g, "\n")
+    .replace(/(?:title|text):/g, "\n")
+    .replace(/[`{}\[\]]/g, " ")
+    .replace(/\\/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+  if (!/Ощадбанк/i.test(section) || !/40\s*%/.test(section) || !/20\s*%/.test(section)) {
+    throw new Error("Mastercard subscription terms sanity check failed");
+  }
+  return {
+    status: 200,
+    raw: section,
+    responseBytes: new TextEncoder().encode(section).byteLength,
+    documentType: "html",
+    contentType: "text/javascript",
+    transport: "mastercard_spa_bundle",
+  };
+}
+
 async function loadSource(source: any) {
+    if (source.id === "oschad-subscriptions-rules") {
+      return await loadMastercardSubscriptionSource();
+    }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
     try {
@@ -794,6 +892,7 @@ async function loadSource(source: any) {
       const focused = focusText(text);
       const pageTitle = loaded.documentType === "pdf" ? (source.purpose || source.bank || "Official PDF") : (safeDbText(titleFromHtml(raw) || '') || null);
       let structured = extractStructured(source, focused, pageTitle);
+      if (source.id === "creditdnepr-cashback") structured = normalizeCreditDniproStructured(text, structured);
       const explicitMaxCashback=extractExplicitMaxCashback(text);
       if(explicitMaxCashback!==null){
         const limits={...(structured.limits||{})};
