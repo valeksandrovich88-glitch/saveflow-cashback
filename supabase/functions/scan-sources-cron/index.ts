@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 26;
+const PARSER_VERSION = 27;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -203,7 +203,9 @@ function extractKnownSourceCategoryPool(text, sourceId) {
     : sourceId==="izibank-cashback-rules" ? IZI_MCC_CATEGORIES
     : null;
   if (!wanted) return [];
-  return wanted.filter(name=>normalized.includes(name.toLocaleLowerCase("uk-UA")));
+  const found=wanted.filter(name=>normalized.includes(name.toLocaleLowerCase("uk-UA")));
+  if(sourceId==="izibank-cashback-rules" && /бонуси\s+на\s+усі\s+покупки/iu.test(raw)) found.push("Усі покупки");
+  return [...new Set(found)];
 }
 function extractMccTableCategoryPool(text) {
   const raw = String(text || "");
@@ -268,6 +270,49 @@ function extractDefinedCategoryPool(text, sourceId="") {
     if(!keys.has(key)){keys.add(key);merged.push(name);}
   }
   return merged.length >= 3 ? merged : [];
+}
+function evidenceNorm(s) {
+  return String(s || "").toLowerCase().replace(/[’'`]/g,"").replace(/[^a-zа-яіїєґ0-9]+/giu," ").trim();
+}
+function evidenceAliases(s) {
+  const n=evidenceNorm(s);
+  if(/аптек|здоров/.test(n)) return ["аптек","медицин"];
+  if(/книг|канц/.test(n)) return ["книг"];
+  if(/кіно|театр/.test(n)) return ["кіно"];
+  if(/азс/.test(n)) return ["азс","авто"];
+  if(/кафе|ресторан/.test(n)) return ["кафе","ресторан"];
+  if(/краса/.test(n)) return ["краса","космет","бюті","салон"];
+  if(/одяг|взут/.test(n)) return ["одяг","взут"];
+  if(/продукт|супермаркет/.test(n)) return ["продукт","супермаркет"];
+  if(/розваг/.test(n)) return ["розваг"];
+  if(/спорт|фітнес/.test(n)) return ["спорт","фітнес"];
+  if(/транспорт/.test(n)) return ["транспорт"];
+  if(/дитяч/.test(n)) return ["дитяч"];
+  if(/дім|ремонт/.test(n)) return ["дім","ремонт","будівниц"];
+  if(/таксі/.test(n)) return ["таксі"];
+  if(/тварин/.test(n)) return ["тварин","зоомаг","ветерин"];
+  if(/квіт/.test(n)) return ["квіт"];
+  if(/усі покупки|всі покупки/.test(n)) return ["усі покупки","всі покупки","усі покупки","всі товари"];
+  return n.split(" ").filter(x=>x.length>=4).slice(0,3);
+}
+function filterAffectedByEvidence(affected, structured) {
+  const items=Array.isArray(structured?.items)?structured.items:[];
+  const pool=Array.isArray(structured?.category_pool)?structured.category_pool:[];
+  return (affected||[]).filter(cell=>{
+    const aliases=evidenceAliases(cell?.category||"");
+    const itemHit=items.some(item=>{
+      const t=evidenceNorm([item?.category,item?.name,...(Array.isArray(item?.evidence)?item.evidence:[])].filter(Boolean).join(" "));
+      return aliases.some(a=>a&&t.includes(evidenceNorm(a)));
+    });
+    const poolHit=pool.some(name=>{
+      const pn=evidenceNorm(name);
+      return aliases.some(a=>{
+        const an=evidenceNorm(a);
+        return an&&(pn.includes(an)||an.includes(pn));
+      });
+    });
+    return itemHit||poolHit;
+  });
 }
 function nearestDateWindow(lines, idx) {
   return extractWindow(lines.slice(Math.max(0, idx - 3), Math.min(lines.length, idx + 4)).join(" "));
@@ -584,7 +629,12 @@ async function loadSource(source: any) {
       if(pendingEvidence?.length){
         const prev=pendingEvidence[0].structured_payload||{};
         const refreshedPayload={...structured,...(prev.bootstrap_review?{bootstrap_review:prev.bootstrap_review}:{})};
-        await service.from("scanner_candidates").update({excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,updated_at:new Date().toISOString()}).eq("id",pendingEvidence[0].id);
+        const {data:currentRefs}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
+        const comparableAffected=filterAffectedByEvidence(currentRefs||[],structured);
+        const updatePayload=comparableAffected.length
+          ? {excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,affected_cells:comparableAffected,updated_at:new Date().toISOString()}
+          : {excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,affected_cells:[],status:"rejected",review_note:"Автоматично закрито: поточне офіційне джерело не містить зіставного підтвердження для reference-комірок.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()};
+        await service.from("scanner_candidates").update(updatePayload).eq("id",pendingEvidence[0].id);
       }
       let candidate:any=null;
       if (isChanged) {
@@ -595,7 +645,7 @@ async function loadSource(source: any) {
         } else if (source.bank) {
           const matrixEvidenceProfile=["cashback","categories","rules"].includes(String(source.parser_profile||""));
           const hasComparableEvidence=Number(structured.item_count||0)>0||(Array.isArray(structured.category_pool)&&structured.category_pool.length>0);
-          if (matrixEvidenceProfile&&hasComparableEvidence) { const {data}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference"); affected=data||[]; }
+          if (matrixEvidenceProfile&&hasComparableEvidence) { const {data}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference"); affected=filterAffectedByEvidence(data||[],structured); }
           if (matrixEvidenceProfile&&hasComparableEvidence&&affected.length) { type="reference_to_official_review"; priority="high"; }
           else if (source.data_mode==="dynamic"||source.data_mode==="personalized"||source.publish_policy==="manual_only") { type="dynamic_or_personalized_source_changed"; priority="high"; }
         }
@@ -612,7 +662,9 @@ async function loadSource(source: any) {
       }
       if (!candidate && isInitial && source.source_role==="primary" && source.bank && ["cashback","categories","rules"].includes(String(source.parser_profile||"")) && !structured.unsupported && safeFocused.trim().length>=80 && (Number(structured.item_count||0)>0 || (Array.isArray(structured.category_pool)&&structured.category_pool.length>0))) {
         const {data:affected}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
-        if (affected?.length) {
+        const comparableAffected=filterAffectedByEvidence(affected||[],structured);
+        if (comparableAffected.length) {
+          const affected=comparableAffected;
           const {data:existingBootstrap}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","reference_to_official_review").eq("new_hash",hash).limit(1);
           if (!existingBootstrap?.length) {
             const bootstrapPayload={...structured,bootstrap_review:{detected_on:new Date().toISOString().slice(0,10),reason:"official_source_added_for_reference_cells",affected_count:affected.length,auto_publish:false}};
