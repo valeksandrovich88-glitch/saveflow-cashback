@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 12;
+const PARSER_VERSION = 13;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -11,7 +11,7 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json; charset=utf-8" } });
 }
 function decodeBasicEntities(s: string) {
-  return s.replace(/&nbsp;|&#160;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&mdash;|&#8212;/gi, "—").replace(/&ndash;|&#8211;/gi, "–");
+  return s.replace(/&nbsp;|&#160;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&mdash;|&#8212;/gi, "—").replace(/&ndash;|&#8211;/gi, "–").replace(/&laquo;|&#171;/gi, "«").replace(/&raquo;|&#187;/gi, "»").replace(/&rsquo;|&#8217;/gi, "’");
 }
 function cleanText(html: string) {
   return decodeBasicEntities(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ").replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\b[^>]*>/gi, "\n").replace(/<\/(?:p|div|li|section|article|main|aside|header|footer|h[1-6]|tr|td|th|ul|ol)>/gi, "\n").replace(/<[^>]+>/g, " "))
@@ -272,6 +272,20 @@ function extractStructured(source, focused, title) {
   if (profile === "categories" || profile === "cashback" || profile === "reference_matrix") {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
+      const paired = line.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*кешбек[\p{L}\p{M}]*\s+за\s+(.+?)\s+та\s+(\d{1,3}(?:[.,]\d+)?)\s*%\s*кешбек[\p{L}\p{M}]*\s+на\s+категор[\p{L}\p{M}]*\s+[«"]?([^»"]{3,90})[»"]?/iu);
+      if (paired) {
+        const firstRate=parseRateNumber(paired[1]), secondRate=parseRateNumber(paired[3]);
+        const w=nearestDateWindow(lines,i);
+        if(firstRate!==null){
+          const firstName=compactLabel(paired[2]);
+          pushItem({kind:"promo",name:firstName,category:null,partner:null,rate_percent:firstRate,rate_text:`${paired[1]}%`,valid_from:w.valid_from||globalWindow.valid_from,valid_to:w.valid_to||globalWindow.valid_to,evidence:[line]});
+        }
+        if(secondRate!==null){
+          const category=compactLabel(paired[4]);
+          pushItem({kind:"category",name:category,category,partner:null,rate_percent:secondRate,rate_text:`${paired[3]}%`,valid_from:w.valid_from||globalWindow.valid_from,valid_to:w.valid_to||globalWindow.valid_to,evidence:[line]});
+        }
+        continue;
+      }
       let m = line.match(/^(.{3,90}?)\s*[—–-]\s*(\d{1,3}(?:[.,]\d+)?)\s*%/u);
       if (m && labelLooksLikeCategory(m[1])) {
         const rate = parseRateNumber(m[2]);
