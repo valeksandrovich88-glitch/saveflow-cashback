@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 16;
+const PARSER_VERSION = 17;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -249,13 +249,58 @@ const DEFINED_CATEGORY_POOL = [
   ["Транспорт", /(?:^|\n)Транспорт\s*\(/iu],
   ["Duty Free", /(?:^|\n)Duty\s*Free\s*\(/iu],
 ];
+function extractMccTableCategoryPool(text) {
+  const raw = String(text || "");
+  const appendixIndex = raw.search(/Додаток\s*1[^\n]*(?:МСС|MCC)|Категорія\s+(?:перелік\s*)?(?:МСС|MCC)/iu);
+  if (appendixIndex < 0) return [];
+  const lines = raw.slice(appendixIndex).split(/\n+/).map(compactLabel).filter(Boolean);
+  const pool = [];
+  const seen = new Set();
+  const add = (name) => {
+    const x = compactLabel(name).replace(/^Категорія\s+/iu,"").trim();
+    if (!x || x.length < 2 || x.length > 80) return;
+    if (/^(?:Додаток.*|Категорія|перелік\s*(?:МСС|MCC)|МСС|MCC)$/iu.test(x)) return;
+    const key = x.toLocaleLowerCase("uk-UA");
+    if (!seen.has(key)) { seen.add(key); pool.push(x); }
+  };
+  let pendingLabels = [];
+  for (let i = 0; i < lines.length && i < 260; i++) {
+    const line = lines[i];
+    const row = line.match(/^(.{2,80}?)\s+((?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,120})(?:\s|$)/u);
+    if (row) {
+      add(row[1]);
+      pendingLabels = [];
+      continue;
+    }
+    const numericOnly = /^(?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,160}$/u.test(line);
+    if (numericOnly) {
+      if (pendingLabels.length) add(pendingLabels.join(" "));
+      pendingLabels = [];
+      continue;
+    }
+    if (!/\d{4}/.test(line) && line.length <= 60 && !/[.:;]$/.test(line)) {
+      pendingLabels.push(line);
+      if (pendingLabels.length > 2) pendingLabels.shift();
+    } else if (!/^\d/.test(line)) {
+      pendingLabels = [];
+    }
+  }
+  return pool.length >= 3 ? pool : [];
+}
 function extractDefinedCategoryPool(text) {
   const raw = String(text || "");
   const pool = [];
   for (const [name, re] of DEFINED_CATEGORY_POOL) {
     if (re.test(raw)) pool.push(name);
   }
-  return pool.length >= 3 ? pool : [];
+  const mccPool = extractMccTableCategoryPool(raw);
+  const merged = [...pool];
+  const keys = new Set(pool.map(x=>x.toLocaleLowerCase("uk-UA")));
+  for (const name of mccPool) {
+    const key=name.toLocaleLowerCase("uk-UA");
+    if(!keys.has(key)){keys.add(key);merged.push(name);}
+  }
+  return merged.length >= 3 ? merged : [];
 }
 function nearestDateWindow(lines, idx) {
   return extractWindow(lines.slice(Math.max(0, idx - 3), Math.min(lines.length, idx + 4)).join(" "));
@@ -636,14 +681,15 @@ async function loadSource(source: any) {
           affected = data || [];
         } else if (source.bank) {
           const matrixEvidenceProfile = ["cashback","categories","rules"].includes(String(source.parser_profile || ""));
-          if (matrixEvidenceProfile) {
+          const hasComparableEvidence = Number(structured.item_count || 0) > 0 || (Array.isArray(structured.category_pool) && structured.category_pool.length > 0);
+          if (matrixEvidenceProfile && hasComparableEvidence) {
             const { data } = await service.from("scanner_matrix_index")
               .select("cell_key,bank,category,current_value,source_tier,source_url")
               .eq("bank", source.bank)
               .eq("source_tier", "reference");
             affected = data || [];
           }
-          if (matrixEvidenceProfile && affected.length) {
+          if (matrixEvidenceProfile && hasComparableEvidence && affected.length) {
             type = "reference_to_official_review";
             priority = "high";
           } else if (source.data_mode === "dynamic" || source.data_mode === "personalized" || source.publish_policy === "manual_only") {
