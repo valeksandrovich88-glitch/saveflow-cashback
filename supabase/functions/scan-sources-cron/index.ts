@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 22;
+const PARSER_VERSION = 23;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -544,6 +544,13 @@ async function loadSource(source: any) {
       const isInitial=!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION, isChanged=!isInitial&&oldHash!==hash&&!structured.unsupported;
       const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
       await service.from("scanner_sources").update({ last_checked_at:new Date().toISOString(), last_http_status:loaded.status, last_hash:hash, last_error:null, fingerprint_version:FINGERPRINT_VERSION }).eq("id",source.id);
+      // Refresh existing pending evidence after parser upgrades without creating duplicate tasks.
+      const {data:pendingEvidence}=await service.from("scanner_candidates").select("id,structured_payload").eq("source_id",source.id).eq("candidate_type","reference_to_official_review").eq("new_hash",hash).eq("status","pending").limit(1);
+      if(pendingEvidence?.length){
+        const prev=pendingEvidence[0].structured_payload||{};
+        const refreshedPayload={...structured,...(prev.bootstrap_review?{bootstrap_review:prev.bootstrap_review}:{})};
+        await service.from("scanner_candidates").update({excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,updated_at:new Date().toISOString()}).eq("id",pendingEvidence[0].id);
+      }
       let candidate:any=null;
       if (isChanged) {
         changed++;
