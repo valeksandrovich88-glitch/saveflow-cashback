@@ -49,13 +49,31 @@
     if(key===KEYS.bonus||key===KEYS.bonusLinks)schedule('bonus');
   };
 
+  function stable(v){try{return JSON.stringify(v??null)}catch(_){return String(v)}}
+
   async function syncMatrix(){
     const c=client(), uid=userId(); if(!c||!uid||!isAdmin())return;
     const ovs=parse(KEYS.matrix,{});
-    const {error:delErr}=await c.from('global_matrix_overrides').delete().neq('cell_key','__never__');
-    if(delErr)throw delErr;
-    const rows=Object.entries(ovs||{}).map(([cell_key,payload])=>({cell_key,payload,updated_by:uid,updated_at:new Date().toISOString()}));
-    if(rows.length){const {error}=await c.from('global_matrix_overrides').upsert(rows,{onConflict:'cell_key'});if(error)throw error;}
+    const {data:existing,error:readErr}=await c.from('global_matrix_overrides').select('cell_key,payload');
+    if(readErr)throw readErr;
+    const current=new Map((existing||[]).map(r=>[r.cell_key,r.payload||{}]));
+    const now=new Date().toISOString();
+    const rows=[];
+    for(const [cell_key,payload] of Object.entries(ovs||{})){
+      if(!current.has(cell_key)||stable(current.get(cell_key))!==stable(payload)){
+        rows.push({cell_key,payload,updated_by:uid,updated_at:now});
+      }
+      current.delete(cell_key);
+    }
+    if(rows.length){
+      const {error}=await c.from('global_matrix_overrides').upsert(rows,{onConflict:'cell_key'});
+      if(error)throw error;
+    }
+    const removed=[...current.keys()];
+    if(removed.length){
+      const {error}=await c.from('global_matrix_overrides').delete().in('cell_key',removed);
+      if(error)throw error;
+    }
   }
 
   function blockRows(block){
@@ -76,10 +94,29 @@
 
   async function syncBlock(block){
     const c=client(); if(!c||!isAdmin())return;
-    const {error:delErr}=await c.from('global_content_items').delete().eq('block',block);
-    if(delErr)throw delErr;
-    const rows=blockRows(block);
-    if(rows.length){const {error}=await c.from('global_content_items').upsert(rows,{onConflict:'block,base_id'});if(error)throw error;}
+    const desired=blockRows(block);
+    const {data:existing,error:readErr}=await c.from('global_content_items').select('block,base_id,payload,hidden,source_url').eq('block',block);
+    if(readErr)throw readErr;
+    const current=new Map((existing||[]).map(r=>[r.base_id,r]));
+    const rows=[];
+    for(const row of desired){
+      const prev=current.get(row.base_id);
+      const changed=!prev
+        || stable(prev.payload)!==stable(row.payload)
+        || Boolean(prev.hidden)!==Boolean(row.hidden)
+        || (prev.source_url||null)!==(row.source_url||null);
+      if(changed)rows.push(row);
+      current.delete(row.base_id);
+    }
+    if(rows.length){
+      const {error}=await c.from('global_content_items').upsert(rows,{onConflict:'block,base_id'});
+      if(error)throw error;
+    }
+    const removed=[...current.keys()];
+    if(removed.length){
+      const {error}=await c.from('global_content_items').delete().eq('block',block).in('base_id',removed);
+      if(error)throw error;
+    }
   }
 
   function localHasGlobal(){
