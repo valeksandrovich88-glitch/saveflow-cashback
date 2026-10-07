@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 33;
+const PARSER_VERSION = 34;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -458,11 +458,12 @@ function extractStructured(source, focused, title) {
       const v = Number(simpleCashbackLimit[1].replace(/\s+/g,""));
       if (Number.isFinite(v) && v > 0 && v <= 100000) maxCashbackCandidates.push(v);
     }
-    const selectMatch = line.match(/обира[\p{L}\p{M}]*\s+(?:до\s+)?(\d+)\s+категор[\p{L}\p{M}]*/iu);
+    const selectMatch = line.match(/обира[\p{L}\p{M}]*\s+(?:до\s+)?(\d+)\s+категор[\p{L}\p{M}]*/iu)
+      || line.match(/(?:діє\s+на\s+)?(\d+)\s+обран[\p{L}\p{M}]*\s+категор[\p{L}\p{M}]*/iu);
     if (selectMatch) {
       const v = Number(selectMatch[1]);
       if (Number.isFinite(v) && v > 0 && v <= 20) maxSelectableCategories = v;
-      if (/щомісяц|кожн[\p{L}\p{M}]*\s+місяц/iu.test(line)) selectionCadence = "monthly";
+      if (/щомісяц|кожн[\p{L}\p{M}]*\s+місяц|оновлю[\p{L}\p{M}]*\s+щомісяц/iu.test(line)) selectionCadence = "monthly";
       else if (/квартал/iu.test(line)) selectionCadence = "quarterly";
     }
     if (/(мінімальн[\p{L}\p{M}]*\s+сума\s+(?:транзакц[\p{L}\p{M}]*|покупк[\p{L}\p{M}]*)|покуп[\p{L}\p{M}]*\s+від\s+\d+\s*(?:грн|грив))/iu.test(line)) {
