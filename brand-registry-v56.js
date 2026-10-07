@@ -58,7 +58,7 @@
     if(/izibank|izistart|iziстарт/.test(c)) return byKey.izi;
     if(/alliance|банк альянс/.test(c)) return byKey.alliance;
     for(const b of BANKS){
-      if(b.aliases.some(a=>r===norm(a)||r.includes(norm(a)))) return b;
+      if(b.aliases.some(a=>{const n=norm(a);return r===n || (n.length>=3 && r.includes(n));})) return b;
     }
     return null;
   }
