@@ -18,6 +18,8 @@
     el.dataset.sfPumbCurrent='1';
     el.dataset.sfSource=SOURCE;
     el.dataset.sfMonth=MONTH;
+    el.dataset.start='2026-10-01';
+    el.dataset.end='2026-10-31';
     el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек ПУМБ жовтень 2026'].join(' '));
     el.title='Офіційна пропозиція ПУМБ на жовтень 2026';
     el.innerHTML=
@@ -144,7 +146,14 @@
     section.addEventListener('change',e=>{
       if(e.target?.matches?.('[data-bank-value],[data-category-value],#partnerSort'))apply();
     });
-    section.querySelector('#resetPartnerFilters')?.addEventListener('click',()=>setTimeout(apply,0));
+    section.querySelector('#resetPartnerFilters')?.addEventListener('click',()=>{
+      setTimeout(()=>{
+        section.querySelectorAll('[data-bank-value],[data-category-value]').forEach(x=>x.checked=false);
+        const search=section.querySelector('#partnerSearch');if(search)search.value='';
+        const sort=section.querySelector('#partnerSort');if(sort)sort.value='rate';
+        apply();
+      },0);
+    });
     const grid=section.querySelector('.partner-grid');
     if(grid)new MutationObserver(()=>{
       if(scheduled)return;
