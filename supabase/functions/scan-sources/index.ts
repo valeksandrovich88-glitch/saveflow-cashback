@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 6;
+const PARSER_VERSION = 7;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -97,6 +97,13 @@ async function sha256(input: string) {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+function detectAccessBlock(raw: string) {
+  const s = String(raw || "");
+  if (/_Incapsula_Resource|\bincapsula\b|\bimperva\b/i.test(s)) return "antibot_incapsula";
+  if (/cf-chl-|challenge-platform|Just a moment(?:\.\.\.)?/i.test(s)) return "antibot_challenge";
+  if (/<title>\s*Access Denied\s*<\/title>|\baccess denied\b/i.test(s) && s.length < 20_000) return "access_denied";
+  return null;
+}
 function titleFromHtml(html: string) {
   const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   return m ? cleanText(m[1]).slice(0, 300) : null;
@@ -469,12 +476,28 @@ Deno.serve(async (req) => {
       const loaded = await loadSource(source);
       const raw = loaded.raw;
       const responseBytes = new TextEncoder().encode(raw).byteLength;
+      const accessBlock = detectAccessBlock(raw);
       const text = cleanText(raw);
       const focused = focusText(text);
       const pageTitle = safeDbText(titleFromHtml(raw) || '') || null;
-      const structured = extractStructured(source, focused, pageTitle);
+      let structured = extractStructured(source, focused, pageTitle);
       const safeFocused = safeDbText(focused);
-      const hash = await sha256(safeFocused);
+      if (accessBlock) {
+        structured = {
+          ...structured,
+          unsupported: true,
+          reason: accessBlock,
+          items: [],
+          item_count: 0,
+          rates_percent: [],
+          mcc: [],
+          limits: {},
+          valid_from: null,
+          valid_to: null,
+        };
+      }
+      const fingerprintInput = accessBlock ? `__source_health__:${accessBlock}:${source.url}` : safeFocused;
+      const hash = await sha256(fingerprintInput);
       const isInitial = !oldHash || sourceFingerprintVersion !== FINGERPRINT_VERSION;
       const isChanged = !isInitial && oldHash !== hash && !structured.unsupported;
 
@@ -560,6 +583,8 @@ Deno.serve(async (req) => {
               detected_on: new Date().toISOString().slice(0, 10),
               reason: structured.unsupported ? (structured.reason || "unsupported_content") : "empty_or_too_short_excerpt",
               excerpt_length: safeFocused.trim().length,
+              response_bytes: responseBytes,
+              transport: loaded.transport,
               auto_publish: false,
             },
           };
