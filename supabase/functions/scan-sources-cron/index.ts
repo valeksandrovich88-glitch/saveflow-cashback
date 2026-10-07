@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 5;
+const PARSER_VERSION = 6;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -376,6 +376,14 @@ Deno.serve(async (req) => {
         }
         const {data,error}=await service.from("scanner_candidates").insert({ run_id:run.id, source_id:source.id, bank:source.bank||null, candidate_type:type, priority, source_role:source.source_role, old_hash:oldHash, new_hash:hash, affected_cells:affected, excerpt:safeFocused.slice(0,6000), parser_version:PARSER_VERSION, structured_payload:structured, status:"pending" }).select("id,candidate_type,priority").single();
         if (!error&&data) { candidate=data; candidates++; }
+      }
+      if (!candidate && source.source_role==="primary" && (structured.unsupported || safeFocused.trim().length<80)) {
+        const {data:existingUnreadable}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_unreadable").eq("new_hash",hash).limit(1);
+        if (!existingUnreadable?.length) {
+          const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,auto_publish:false}};
+          const {data:unreadableCandidate,error:unreadableError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:"official_source_unreadable",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:hash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:unreadablePayload,status:"pending"}).select("id,candidate_type,priority").single();
+          if (!unreadableError&&unreadableCandidate) { candidate=unreadableCandidate; candidates++; }
+        }
       }
       if (!candidate && source.source_role==="primary" && source.data_mode==="fixed" && source.publish_policy==="review_required" && !structured.unsupported && structured.valid_to) {
         const today=new Date().toISOString().slice(0,10);
