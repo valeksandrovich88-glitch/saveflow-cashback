@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 7;
+const PARSER_VERSION = 8;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -99,9 +99,12 @@ async function sha256(input: string) {
 
 function detectAccessBlock(raw: string) {
   const s = String(raw || "");
-  if (/_Incapsula_Resource|\bincapsula\b|\bimperva\b/i.test(s)) return "antibot_incapsula";
-  if (/cf-chl-|challenge-platform|Just a moment(?:\.\.\.)?/i.test(s)) return "antibot_challenge";
-  if (/<title>\s*Access Denied\s*<\/title>|\baccess denied\b/i.test(s) && s.length < 20_000) return "access_denied";
+  const incapsula = /_Incapsula_Resource|\bincapsula\b|\bimperva\b/i.test(s);
+  const noIndexChallenge = /<meta[^>]+name\s*=\s*["']?robots["']?[^>]+content\s*=\s*["']?noindex\s*,\s*nofollow/i.test(s);
+  if (incapsula && (s.length < 5_000 || noIndexChallenge)) return "antibot_incapsula";
+  const cloudflare = /cf-chl-|challenge-platform|Just a moment(?:\.\.\.)?/i.test(s);
+  if (cloudflare && (s.length < 20_000 || /<title[^>]*>\s*Just a moment/i.test(s))) return "antibot_challenge";
+  if (s.length < 20_000 && (/<title>\s*Access Denied\s*<\/title>|\baccess denied\b/i.test(s))) return "access_denied";
   return null;
 }
 function titleFromHtml(html: string) {
