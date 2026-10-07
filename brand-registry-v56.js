@@ -36,7 +36,7 @@
 
   function resolve(raw,ctx=''){
     const r=norm(raw), c=norm(ctx);
-    if(/o\.bank|obank|запроси друзів — o\.bank/.test(c)) return byKey.obank;
+    if(/(^|[^a-zа-яіїєґ0-9])o\.bank([^a-zа-яіїєґ0-9]|$)|запроси друзів — o\.bank/.test(c)) return byKey.obank;
     if(/бізбанк|bis24|bisbank/.test(c)) return byKey.bis;
     if(/пумб|pumb/.test(c)) return byKey.pumb;
     if(/ощадбанк|ощад/.test(c)) return byKey.oschad;
