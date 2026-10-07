@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 27;
+const PARSER_VERSION = 28;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -317,6 +317,23 @@ function filterAffectedByEvidence(affected, structured) {
 function nearestDateWindow(lines, idx) {
   return extractWindow(lines.slice(Math.max(0, idx - 3), Math.min(lines.length, idx + 4)).join(" "));
 }
+function extractRadaRewardsCards(html) {
+  const raw=String(html||"");
+  const section=raw.match(/Категорії\s+кешбеку\s+на\s+([^<]+)<\/h3>([\s\S]*?)(?:Категорії\s+партнерського\s+кешбеку|Часті\s+запитання)/iu);
+  if(!section) return {items:[],valid_from:null,valid_to:null};
+  const month=extractWindow(`Категорії кешбеку на ${cleanText(section[1])}`);
+  const items=[];
+  for(const m of section[2].matchAll(/cards-grid__item[\s\S]*?cards-grid__heading[^>]*>\s*([^<]+?)\s*<\/div>[\s\S]*?cards-grid__text[^>]*>\s*(\d{1,3}(?:[.,]\d+)?)\s*%/giu)){
+    const name=compactLabel(decodeBasicEntities(m[1]));
+    const rate=parseRateNumber(m[2]);
+    if(!name||rate===null)continue;
+    items.push({
+      kind:"category",name,category:name,partner:null,rate_percent:rate,rate_text:`${m[2]}%`,
+      valid_from:month.valid_from,valid_to:month.valid_to,evidence:[`${name} — ${m[2]}%`]
+    });
+  }
+  return {items,valid_from:month.valid_from,valid_to:month.valid_to};
+}
 function safeDbText(s) {
   return String(s || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ").replace(/[ \t]+/g, " ");
 }
@@ -353,6 +370,7 @@ function extractStructured(source, focused, title) {
 
   let maxCashback = null;
   const maxCashbackCandidates = [];
+  const strongMaxCashbackCandidates = [];
   let minPurchase = null;
   let maxSelectableCategories = null;
   let selectionCadence = null;
@@ -366,7 +384,10 @@ function extractStructured(source, focused, title) {
     const maxMatch = limitContext.match(/(?:максимальн[\p{L}\p{M}]*\s+(?:(?:сума|розмір).{0,80}(?:кешбек|винагород)|кешбек)|поверт[\p{L}\p{M}]*.{0,50}на рахунок до)[^\d]{0,120}(\d[\d\s]{0,12})(?:\s*\([^)]*\))?\s*(?:грн|₴|грив(?:ень|ні|ня)?)/iu);
     if (maxMatch) {
       const v = Number(maxMatch[1].replace(/\s+/g,""));
-      if (Number.isFinite(v) && v > 0 && v <= 100000) maxCashbackCandidates.push(v);
+      if (Number.isFinite(v) && v > 0 && v <= 100000) {
+        maxCashbackCandidates.push(v);
+        strongMaxCashbackCandidates.push(v);
+      }
     }
     const simpleCashbackLimit = line.match(/(?:кешбек|cashback)[^\n]{0,90}?до\s+(\d[\d\s]{0,10})\s*(?:грн|₴|грив(?:ень|ні|ня)?)/iu);
     if (simpleCashbackLimit) {
@@ -401,7 +422,10 @@ function extractStructured(source, focused, title) {
   }
 
   const uniqueMaxCashbackCandidates = [...new Set(maxCashbackCandidates)].sort((a,b)=>a-b);
-  maxCashback = uniqueMaxCashbackCandidates.length === 1 ? uniqueMaxCashbackCandidates[0] : null;
+  const uniqueStrongMaxCashbackCandidates = [...new Set(strongMaxCashbackCandidates)].sort((a,b)=>a-b);
+  maxCashback = uniqueStrongMaxCashbackCandidates.length === 1
+    ? uniqueStrongMaxCashbackCandidates[0]
+    : (uniqueMaxCashbackCandidates.length === 1 ? uniqueMaxCashbackCandidates[0] : null);
 
   const items = [];
   const pushItem = (item) => {
@@ -616,6 +640,16 @@ async function loadSource(source: any) {
     try {
       const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), accessBlock=loaded.documentType==="pdf"?null:detectAccessBlock(raw), text=loaded.documentType==="pdf"?String(raw||"").replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim():cleanText(raw), categoryPool=extractDefinedCategoryPool(text,source.id), focused=focusText(text), pageTitle=loaded.documentType==="pdf"?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null);
       let structured=extractStructured(source, focused, pageTitle);
+      if(source.id==="rada-rewards"&&loaded.documentType!=="pdf"){
+        const rada=extractRadaRewardsCards(raw);
+        if(rada.items.length){
+          const existing=Array.isArray(structured.items)?structured.items:[];
+          const keys=new Set(existing.map(x=>JSON.stringify([x.kind,x.name,x.rate_percent,x.valid_from,x.valid_to])));
+          const merged=[...existing];
+          for(const item of rada.items){const key=JSON.stringify([item.kind,item.name,item.rate_percent,item.valid_from,item.valid_to]);if(!keys.has(key)){keys.add(key);merged.push(item);}}
+          structured={...structured,items:merged,item_count:merged.length,valid_from:rada.valid_from||structured.valid_from,valid_to:rada.valid_to||structured.valid_to,confidence:"review_ready"};
+        }
+      }
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       const safeFocused=safeDbText(focused);
