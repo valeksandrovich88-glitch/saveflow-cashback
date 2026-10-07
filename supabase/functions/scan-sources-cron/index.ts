@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 18;
+const PARSER_VERSION = 19;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -185,7 +185,20 @@ function extractMccTableCategoryPool(text) {
   const raw = String(text || "");
   const appendixIndex = raw.search(/Додаток\s*1[^\n]*(?:МСС|MCC)|Категорія\s+(?:перелік\s*)?(?:МСС|MCC)/iu);
   if (appendixIndex < 0) return [];
-  const lines = raw.slice(appendixIndex).split(/\n+/).map(compactLabel).filter(Boolean);
+  const appendixRaw = raw.slice(appendixIndex);
+  const normalizedAppendix = appendixRaw.replace(/\s+/g," ").toLocaleLowerCase("uk-UA");
+  const knownCategories = [
+    "Duty Free","Quasi Cash","Авіаквитки","Аврора та інші мультимаркети","Автосервіси","АЗС","Аптеки",
+    "Благодійність","Готелі","Грошові перекази","Доставка","Ігри та застосунки","Кафе та ресторани",
+    "Квіти","Кіно та театри","Книги","Комунальні послуги","Краса та догляд","Маркетплейси",
+    "Медичні заклади","Одяг та взуття","Операції в банкоматі","Оренда авто","Побутова техніка",
+    "Прикраси та подарунки","Продукти та супермаркети","Розваги","Спорт","Страхування","Таксі",
+    "Товари для дітей","Транспорт","Усе для дому","Усе для тварин","Хімчистка","Поповнення мобільного телефону"
+  ];
+  const known = knownCategories.filter(name=>normalizedAppendix.includes(name.toLocaleLowerCase("uk-UA")));
+  if (known.length >= 3) return known;
+
+  const lines = appendixRaw.split(/\n+/).map(compactLabel).filter(Boolean);
   const pool = [];
   const seen = new Set();
   const cleanup = (name) => String(name || "")
