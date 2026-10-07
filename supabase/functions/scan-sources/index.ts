@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 9;
+const PARSER_VERSION = 10;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -443,6 +443,7 @@ Deno.serve(async (req) => {
 
   async function loadSource(source: any) {
     let directError: unknown = null;
+    let blockedDirect: { status: number; raw: string; transport: string } | null = null;
     try {
       const res = await fetch(source.url, {
         redirect: "follow",
@@ -457,7 +458,7 @@ Deno.serve(async (req) => {
       });
       const raw = await res.text();
       if (res.ok) return { status: res.status, raw, transport: "edge_fetch" };
-      if (detectAccessBlock(raw)) return { status: res.status, raw, transport: "edge_fetch_blocked" };
+      if (detectAccessBlock(raw)) blockedDirect = { status: res.status, raw, transport: "edge_fetch_blocked" };
       directError = new Error(`HTTP ${res.status}`);
     } catch (e) {
       directError = e;
@@ -474,6 +475,7 @@ Deno.serve(async (req) => {
         return { status: Number(row.status), raw: fallbackRaw, transport: "db_http_fallback_blocked" };
       }
     }
+    if (blockedDirect) return blockedDirect;
     const fallbackMessage = error?.message || (row ? `HTTP ${row.status}` : "Fallback returned no data");
     const directMessage = directError instanceof Error ? directError.message : String(directError || "Direct fetch failed");
     throw new Error(`${directMessage}; fallback: ${fallbackMessage}`);
