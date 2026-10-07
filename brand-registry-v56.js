@@ -68,8 +68,10 @@
   st.textContent=`
     .promo-bank,.partner-bank{display:flex!important;align-items:center!important;gap:7px!important}
     .promo-bank>span:last-child,.partner-bank>span:last-child{display:inline!important;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#375240!important;font-weight:800!important}
-    .mini-logo,.bank-logo{background:rgba(248,252,248,.72)!important;border:1px solid rgba(188,214,194,.58);box-sizing:border-box;padding:2px;object-fit:contain}
-    .mini-logo-fallback,.bank-logo-fallback{padding:0!important}
+    .mini-logo-wrap,.bank-logo-wrap{display:grid!important;place-items:center!important;background:transparent!important;border:0!important;padding:0!important;overflow:visible!important}
+    .mini-logo-wrap{width:24px!important;height:24px!important;flex:0 0 24px!important}.bank-logo-wrap{width:28px!important;height:28px!important;margin:0 auto 4px!important}
+    .mini-logo-wrap>svg{width:24px!important;height:24px!important;display:block!important}.bank-logo-wrap>svg{width:28px!important;height:28px!important;display:block!important}
+    .mini-logo,.bank-logo,.mini-logo-fallback,.bank-logo-fallback{display:none!important}
   `;
   document.head.appendChild(st);
 
@@ -92,7 +94,7 @@
       const b=resolve(nameEl?.textContent||'',head.textContent||'');
       if(!b)return;
       if(nameEl) nameEl.textContent=b.name;
-      setLogo(head.querySelector('.bank-logo-wrap'),b,'bank-logo');
+      setLogo(head.querySelector('.bank-logo-wrap'),b);
     });
   }
 
@@ -109,7 +111,7 @@
     if(!b)return;
     if(nameEl) nameEl.textContent=b.name;
     if(card.dataset.bank) card.dataset.bank=b.name;
-    setLogo(row.querySelector('.mini-logo-wrap'),b,'mini-logo');
+    setLogo(row.querySelector('.mini-logo-wrap'),b);
   }
 
   function run(){
