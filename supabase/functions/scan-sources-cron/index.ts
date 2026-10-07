@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 28;
+const PARSER_VERSION = 29;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -421,6 +421,10 @@ function extractStructured(source, focused, title) {
     }
   }
 
+  for (const m of allText.matchAll(/максимальн[\p{L}\p{M}]*[^\n.]{0,120}?(?:кешбек|винагород)[^\d\n]{0,60}(\d[\d\s]{0,10})\s*(?:грн|₴|грив(?:ень|ні|ня)?)/giu)) {
+    const v=Number(m[1].replace(/\s+/g,""));
+    if(Number.isFinite(v)&&v>0&&v<=100000){maxCashbackCandidates.push(v);strongMaxCashbackCandidates.push(v);}
+  }
   const uniqueMaxCashbackCandidates = [...new Set(maxCashbackCandidates)].sort((a,b)=>a-b);
   const uniqueStrongMaxCashbackCandidates = [...new Set(strongMaxCashbackCandidates)].sort((a,b)=>a-b);
   maxCashback = uniqueStrongMaxCashbackCandidates.length === 1
