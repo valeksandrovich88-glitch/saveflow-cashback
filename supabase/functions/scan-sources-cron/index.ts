@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 17;
+const PARSER_VERSION = 18;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -188,32 +188,40 @@ function extractMccTableCategoryPool(text) {
   const lines = raw.slice(appendixIndex).split(/\n+/).map(compactLabel).filter(Boolean);
   const pool = [];
   const seen = new Set();
+  const cleanup = (name) => String(name || "")
+    .replace(/^Категорія\s+/iu,"")
+    .replace(/^(?:послуг|товарів|операцій)\s+(?=[А-ЯІЇЄҐA-Z])/u,"")
+    .replace(/\s+Категорія$/iu,"")
+    .replace(/\s+/g," ")
+    .trim();
   const add = (name) => {
-    const x = compactLabel(name).replace(/^Категорія\s+/iu,"").trim();
+    const x = cleanup(name);
     if (!x || x.length < 2 || x.length > 80) return;
-    if (/^(?:Додаток.*|Категорія|перелік\s*(?:МСС|MCC)|МСС|MCC)$/iu.test(x)) return;
+    if (!/[\p{L}]/u.test(x)) return;
+    if (/^(?:Додаток.*|Категорія|перелік\s*(?:МСС|MCC)|МСС|MCC|послуг|товарів|операцій)$/iu.test(x)) return;
     const key = x.toLocaleLowerCase("uk-UA");
     if (!seen.has(key)) { seen.add(key); pool.push(x); }
   };
   let pendingLabels = [];
   for (let i = 0; i < lines.length && i < 260; i++) {
     const line = lines[i];
-    const row = line.match(/^(.{2,80}?)\s+((?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,120})(?:\s|$)/u);
+    const row = line.match(/^([\p{L}][\p{L}\p{M}\s’'&+./()\-]{1,79}?)\s+((?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,160})(?:\s|$)/u);
     if (row) {
       add(row[1]);
       pendingLabels = [];
       continue;
     }
-    const numericOnly = /^(?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,160}$/u.test(line);
+    const numericOnly = /^(?:0\d{3}|[1-9]\d{3})(?:\s+(?:0\d{3}|[1-9]\d{3})){0,200}$/u.test(line);
     if (numericOnly) {
       if (pendingLabels.length) add(pendingLabels.join(" "));
       pendingLabels = [];
       continue;
     }
-    if (!/\d{4}/.test(line) && line.length <= 60 && !/[.:;]$/.test(line)) {
+    const labelOnly = /^[\p{L}][\p{L}\p{M}\s’'&+./()\-]{1,59}$/u.test(line);
+    if (labelOnly && !/^(?:Категорія|перелік\s*(?:МСС|MCC)|МСС|MCC)$/iu.test(line)) {
       pendingLabels.push(line);
       if (pendingLabels.length > 2) pendingLabels.shift();
-    } else if (!/^\d/.test(line)) {
+    } else {
       pendingLabels = [];
     }
   }
