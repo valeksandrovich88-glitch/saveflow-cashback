@@ -16,8 +16,8 @@ values
    'cashback card, monthly categories, limits and partner cashback','cashback','dynamic','primary','manual_only',true),
   ('creditdnepr-cashback','Банк Кредит Дніпро','https://creditdnepr.com.ua/pryvatnym-osobam/platizni-kartki/cashback',
    'cashback program, monthly category model and partner offers','cashback','dynamic','primary','manual_only',true),
-  ('tascom-verycard','ТАСКОМБАНК','https://verycard.tascombank.ua/',
-   'VERY CARD cashback rates for pharmacies, utilities, fuel and groceries','cashback','fixed','primary','review_required',true)
+  ('tascom-verycard','ТАСКОМБАНК','https://tascombank.ua/promo/zayavka-na-card-credit/',
+   'cashback rates for Big Five and PudraCard card products','cashback','fixed','primary','review_required',true)
 on conflict (id) do update set
   bank = excluded.bank,
   url = excluded.url,
