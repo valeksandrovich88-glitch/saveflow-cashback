@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 23;
+const PARSER_VERSION = 24;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -377,6 +377,8 @@ function extractStructured(source, focused, title) {
   let maxCashback = null;
   const maxCashbackCandidates = [];
   let minPurchase = null;
+  let maxSelectableCategories = null;
+  let selectionCadence = null;
   const bonusAmounts = [];
   const mcc = new Set();
   const conditionLines = [];
@@ -388,6 +390,18 @@ function extractStructured(source, focused, title) {
     if (maxMatch) {
       const v = Number(maxMatch[1].replace(/\s+/g,""));
       if (Number.isFinite(v) && v > 0 && v <= 100000) maxCashbackCandidates.push(v);
+    }
+    const simpleCashbackLimit = line.match(/(?:кешбек|cashback)[^\n]{0,90}?\bдо\s+(\d[\d\s]{0,10})\s*(?:грн|₴|грив(?:ень|ні|ня)?)/iu);
+    if (simpleCashbackLimit) {
+      const v = Number(simpleCashbackLimit[1].replace(/\s+/g,""));
+      if (Number.isFinite(v) && v > 0 && v <= 100000) maxCashbackCandidates.push(v);
+    }
+    const selectMatch = line.match(/обира[\p{L}\p{M}]*\s+(?:до\s+)?(\d+)\s+категор[\p{L}\p{M}]*/iu);
+    if (selectMatch) {
+      const v = Number(selectMatch[1]);
+      if (Number.isFinite(v) && v > 0 && v <= 20) maxSelectableCategories = v;
+      if (/щомісяц|кожн[\p{L}\p{M}]*\s+місяц/iu.test(line)) selectionCadence = "monthly";
+      else if (/квартал/iu.test(line)) selectionCadence = "quarterly";
     }
     if (/(мінімальн[\p{L}\p{M}]*\s+сума\s+(?:транзакц[\p{L}\p{M}]*|покупк[\p{L}\p{M}]*)|покуп[\p{L}\p{M}]*\s+від\s+\d+\s*(?:грн|грив))/iu.test(line)) {
       const mm = line.match(/(\d+(?:[.,]\d+)?)\s*(?:грн|грив)/iu);
@@ -404,7 +418,7 @@ function extractStructured(source, focused, title) {
       const local = [line, lines[i+1] || "", lines[i+2] || "", lines[i+3] || ""].join(" ");
       for (const mm of local.matchAll(/\b([1-9]\d{3})\b/g)) mcc.add(mm[1]);
     }
-    if (/(активуй|активувати|обира[\p{L}\p{M}]+\s+\d+\s+категор|власн[\p{L}\p{M}]*\s+або\s+кредитн|картк[\p{L}\p{M}]*\s+(?:visa|mastercard|radacard)|реєстр[\p{L}\p{M}]+\s+картк|персоналізован)/iu.test(line)) {
+    if (/(активуй|активувати|обира[\p{L}\p{M}]+\s+(?:до\s+)?\d+\s+категор|власн[\p{L}\p{M}]*\s+або\s+кредитн|картк[\p{L}\p{M}]*\s+(?:visa|mastercard|radacard)|реєстр[\p{L}\p{M}]+\s+картк|персоналізован)/iu.test(line)) {
       if (conditionLines.length < 14) conditionLines.push(line.slice(0,320));
     }
   }
@@ -458,6 +472,20 @@ function extractStructured(source, focused, title) {
             const display = looksBase ? "Інші покупки" : target;
             pushItem({ kind, name:display, category:kind==="category"?display:null, partner:kind==="partner"?display:null, rate_percent:rate, rate_text:`${m[1]}%`, valid_from:w.valid_from || globalWindow.valid_from, valid_to:w.valid_to || globalWindow.valid_to, evidence:[line] });
           }
+        }
+      }
+    }
+  }
+
+  if (profile === "cashback" || profile === "promos" || profile === "rules") {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const special = line.match(/^(кешбек\s+від\s+партнерів|кешбек[-\s]?маркет)[^\d%]{0,40}?(?:до\s+)?(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+      if (special) {
+        const rate=parseRateNumber(special[2]);
+        if(rate!==null){
+          const w=nearestDateWindow(lines,i);
+          pushItem({kind:"program",name:compactLabel(special[1]),category:null,partner:null,rate_percent:rate,rate_text:`${special[2]}%`,valid_from:w.valid_from||globalWindow.valid_from,valid_to:w.valid_to||globalWindow.valid_to,evidence:[line]});
         }
       }
     }
@@ -520,6 +548,10 @@ function extractStructured(source, focused, title) {
       max_cashback_candidates_uah: uniqueMaxCashbackCandidates,
       min_purchase_uah: minPurchase,
       bonus_amounts: [...new Set(bonusAmounts)].slice(0,20)
+    },
+    selection: {
+      max_categories: maxSelectableCategories,
+      cadence: selectionCadence
     },
     mcc: [...mcc].slice(0,60),
     conditions: conditionLines,
