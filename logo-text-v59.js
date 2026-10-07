@@ -19,7 +19,7 @@
   }
   const st=document.createElement('style');
   st.id='sf-logo-text-v59-style';
-  st.textContent='.sf-bank-name-with-logo{display:inline-flex!important;align-items:center!important;gap:8px!important;vertical-align:middle}.sf-bank-name-with-logo>.sf-inline-logo{display:inline-grid!important;place-items:center!important;width:44px!important;height:32px!important;flex:0 0 44px!important}.sf-bank-name-with-logo>.sf-inline-logo svg,.sf-bank-name-with-logo>.sf-inline-logo img{width:100%!important;height:100%!important;display:block!important;object-fit:contain!important}.sf-bank-name-with-logo>.sf-inline-logo img{border-radius:6px}.bank-head .sf-bank-name-with-logo>.sf-inline-logo{width:56px!important;height:38px!important;flex-basis:56px!important}.bank-head .sf-bank-name-with-logo>.sf-inline-logo svg,.bank-head .sf-bank-name-with-logo>.sf-inline-logo img{width:100%!important;height:100%!important}.promo-bank .mini-logo-wrap,.partner-bank .mini-logo-wrap,.bank-head .bank-logo-wrap{display:none!important}';
+  st.textContent='.sf-bank-name-with-logo{display:inline-flex!important;align-items:center!important;gap:8px!important;vertical-align:middle}.sf-bank-name-with-logo>.sf-inline-logo{display:inline-grid!important;place-items:center!important;width:44px!important;height:32px!important;flex:0 0 44px!important}.sf-bank-name-with-logo>.sf-inline-logo svg,.sf-bank-name-with-logo>.sf-inline-logo img{width:100%!important;height:100%!important;display:block!important;object-fit:contain!important}.sf-bank-name-with-logo>.sf-inline-logo.sf-inline-logo-izi svg{width:26px!important;height:26px!important}.sf-bank-name-with-logo>.sf-inline-logo img{border-radius:6px}.bank-head .sf-bank-name-with-logo>.sf-inline-logo{width:56px!important;height:38px!important;flex-basis:56px!important}.bank-head .sf-bank-name-with-logo>.sf-inline-logo svg,.bank-head .sf-bank-name-with-logo>.sf-inline-logo img{width:100%!important;height:100%!important}.bank-head .sf-bank-name-with-logo>.sf-inline-logo.sf-inline-logo-izi svg{width:30px!important;height:30px!important}.promo-bank .mini-logo-wrap,.partner-bank .mini-logo-wrap,.bank-head .bank-logo-wrap{display:none!important}';
   document.head.appendChild(st);
   function patch(){
     const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
@@ -33,7 +33,7 @@
       const card=p.closest('.promo-card,.bonus-card,.partner-card,.bank-head');if(!card)return;
       if(p.classList.contains('sf-bank-name-with-logo'))return;
       const wrap=document.createElement('span');wrap.className='sf-bank-name-with-logo';
-      const icon=document.createElement('span');icon.className='sf-inline-logo';icon.innerHTML=logoMarkup(name);const im=icon.querySelector('img');if(im)im.addEventListener('error',()=>{icon.innerHTML=svg(name)},{once:true});
+      const icon=document.createElement('span');icon.className='sf-inline-logo'+(name==='izibank'?' sf-inline-logo-izi':'');icon.innerHTML=logoMarkup(name);const im=icon.querySelector('img');if(im)im.addEventListener('error',()=>{icon.innerHTML=svg(name)},{once:true});
       node.parentNode.insertBefore(wrap,node);wrap.append(icon,node);if(name==='O.Bank')node.nodeValue='Ідея Банк · O.Bank';
     });
   }
