@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 35;
+const PARSER_VERSION = 36;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -330,9 +330,15 @@ function extractPumbPartnerRoster(rawHtml) {
   if (end > 0) segment = segment.slice(0, end);
   const names = [];
   const seen = new Set();
-  const re = /name:\\\"([^"\\]{1,120})\\\"/g;
-  for (const match of segment.matchAll(re)) {
-    const name = String(match[1] || "").replace(/\\u002F/g, "/").trim();
+  const parts = segment.split("{name:").slice(1);
+  for (const part of parts) {
+    let head = String(part || "").trimStart();
+    if (head.charCodeAt(0) === 92 && head.charCodeAt(1) === 34) head = head.slice(2);
+    else if (head.charCodeAt(0) === 34) head = head.slice(1);
+    let endQuote = head.indexOf('\\\"');
+    if (endQuote < 0) endQuote = head.indexOf('"');
+    if (endQuote < 1 || endQuote > 120) continue;
+    const name = head.slice(0, endQuote).replace(/\\\\u002F/g, "/").trim();
     const key = name.toLocaleLowerCase("uk-UA");
     if (!name || seen.has(key)) continue;
     seen.add(key);
