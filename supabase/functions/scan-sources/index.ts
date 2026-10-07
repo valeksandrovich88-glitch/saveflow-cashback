@@ -834,7 +834,7 @@ async function loadSource(source: any) {
       });
       const fetched = await readFetchedResponse(res);
       const raw = fetched.raw;
-      if (res.ok) return { status: res.status, raw, responseBytes: fetched.responseBytes, documentType: fetched.documentType, contentType: fetched.contentType, transport: fetched.documentType === "pdf" ? "edge_fetch_pdf" : "edge_fetch" };
+      if (res.ok) return { status: res.status, raw, responseBytes: fetched.responseBytes, documentType: fetched.documentType, contentType: fetched.contentType, binaryHash: fetched.binaryHash || null, transport: fetched.documentType === "pdf" ? "edge_fetch_pdf" : "edge_fetch" };
       if (detectAccessBlock(raw)) blockedDirect = { status: res.status, raw, responseBytes: fetched.responseBytes, documentType: fetched.documentType, contentType: fetched.contentType, transport: "edge_fetch_blocked" };
       directError = new Error(`HTTP ${res.status}`);
     } catch (e) {
