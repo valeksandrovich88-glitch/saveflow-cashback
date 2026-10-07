@@ -445,7 +445,7 @@ Deno.serve(async (req) => {
           if (!unreadableError&&unreadableCandidate) { candidate=unreadableCandidate; candidates++; }
         }
       }
-      if (!candidate && isInitial && source.source_role==="primary" && source.bank && !structured.unsupported && safeFocused.trim().length>=80 && (source.publish_policy==="review_required" || Number(structured.item_count||0)>0)) {
+      if (!candidate && isInitial && source.source_role==="primary" && source.bank && !structured.unsupported && safeFocused.trim().length>=80 && (Number(structured.item_count||0)>0 || (Array.isArray(structured.category_pool)&&structured.category_pool.length>0))) {
         const {data:affected}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
         if (affected?.length) {
           const {data:existingBootstrap}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","reference_to_official_review").eq("new_hash",hash).limit(1);
