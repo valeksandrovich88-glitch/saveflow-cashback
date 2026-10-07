@@ -10,9 +10,14 @@
     const [bg,fg,mark]=BANKS[name]; const fs=mark.length>=3?7:mark.length===2?8.5:11.5;
     return '<svg viewBox="0 0 28 28"><rect x=".5" y=".5" width="27" height="27" rx="8" fill="'+esc(bg)+'" stroke="rgba(255,255,255,.28)"/><text x="14" y="14.7" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="'+fs+'" font-weight="800" fill="'+esc(fg)+'">'+esc(mark)+'</text></svg>';
   }
+  function logoMarkup(name){
+    const src=window.SAVEFLOW_BANK_LOGOS?.[name];
+    if(src) return '<img src="'+src+'" alt="" loading="lazy">';
+    return svg(name);
+  }
   const st=document.createElement('style');
   st.id='sf-logo-text-v59-style';
-  st.textContent='.sf-bank-name-with-logo{display:inline-flex!important;align-items:center!important;gap:7px!important;vertical-align:middle}.sf-bank-name-with-logo>.sf-inline-logo{display:inline-grid!important;place-items:center!important;width:24px!important;height:24px!important;flex:0 0 24px!important}.sf-bank-name-with-logo>.sf-inline-logo svg{width:24px!important;height:24px!important;display:block!important}.bank-head .sf-bank-name-with-logo>.sf-inline-logo{width:28px!important;height:28px!important;flex-basis:28px!important}.bank-head .sf-bank-name-with-logo>.sf-inline-logo svg{width:28px!important;height:28px!important}.promo-bank .mini-logo-wrap,.partner-bank .mini-logo-wrap,.bank-head .bank-logo-wrap{display:none!important}';
+  st.textContent='.sf-bank-name-with-logo{display:inline-flex!important;align-items:center!important;gap:7px!important;vertical-align:middle}.sf-bank-name-with-logo>.sf-inline-logo{display:inline-grid!important;place-items:center!important;width:24px!important;height:24px!important;flex:0 0 24px!important}.sf-bank-name-with-logo>.sf-inline-logo svg,.sf-bank-name-with-logo>.sf-inline-logo img{width:24px!important;height:24px!important;display:block!important;object-fit:contain!important}.sf-bank-name-with-logo>.sf-inline-logo img{border-radius:6px}.bank-head .sf-bank-name-with-logo>.sf-inline-logo{width:28px!important;height:28px!important;flex-basis:28px!important}.bank-head .sf-bank-name-with-logo>.sf-inline-logo svg,.bank-head .sf-bank-name-with-logo>.sf-inline-logo img{width:28px!important;height:28px!important}.promo-bank .mini-logo-wrap,.partner-bank .mini-logo-wrap,.bank-head .bank-logo-wrap{display:none!important}';
   document.head.appendChild(st);
   function patch(){
     const walker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
@@ -26,7 +31,7 @@
       const card=p.closest('.promo-card,.bonus-card,.partner-card,.bank-head');if(!card)return;
       if(p.classList.contains('sf-bank-name-with-logo'))return;
       const wrap=document.createElement('span');wrap.className='sf-bank-name-with-logo';
-      const icon=document.createElement('span');icon.className='sf-inline-logo';icon.innerHTML=svg(name);
+      const icon=document.createElement('span');icon.className='sf-inline-logo';icon.innerHTML=logoMarkup(name);
       node.parentNode.insertBefore(wrap,node);wrap.append(icon,node);
     });
   }
