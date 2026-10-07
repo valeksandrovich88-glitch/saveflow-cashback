@@ -4,7 +4,7 @@ import { getDocumentProxy } from "npm:unpdf@1.8.1";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 21;
+const PARSER_VERSION = 22;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -472,6 +472,9 @@ Deno.serve(async (req) => {
   const { data: sources, error: sourceError } = await service.from("scanner_sources").select("*").eq("enabled", true).order("source_role", { ascending: true }).order("bank", { ascending: true, nullsFirst: false });
   if (sourceError) return json({ error: sourceError.message }, 500);
 
+  const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  await service.from("scanner_runs").update({status:"failed",finished_at:new Date().toISOString(),summary:{reason:"stale_run_auto_closed"}}).eq("status","running").lt("started_at",staleBefore);
+
   const { data: run, error: runError } = await service.from("scanner_runs").insert({ triggered_by: null, trigger_kind: "scheduled_monthly", total_sources: sources?.length || 0, status: "running" }).select("id").single();
   if (runError || !run) return json({ error: runError?.message || "Could not create run" }, 500);
 
@@ -598,7 +601,7 @@ async function loadSource(source: any) {
   }
 
   const list=sources||[];
-  for (let i=0;i<list.length;i+=4) await Promise.all(list.slice(i,i+4).map(scanOne));
+  for (let i=0;i<list.length;i+=6) await Promise.all(list.slice(i,i+6).map(scanOne));
   const finalStatus=failed===list.length&&list.length>0?"failed":(failed?"partial":"completed");
   await service.from("scanner_runs").update({finished_at:new Date().toISOString(),status:finalStatus,changed_sources:changed,failed_sources:failed,candidates_created:candidates,summary:{fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results}}).eq("id",run.id);
   return json({run_id:run.id,status:finalStatus,total_sources:list.length,changed_sources:changed,failed_sources:failed,candidates_created:candidates,fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results});
