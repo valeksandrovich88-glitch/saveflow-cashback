@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 6;
+const PARSER_VERSION = 7;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -35,6 +35,13 @@ function focusText(text: string) {
   return selected.map((x)=>x.replace(/\b(?:сьогодні|зараз)\b/gi,(m)=>m.toLowerCase())).join("\n").slice(0,100_000);
 }
 async function sha256(input: string) { const bytes = new TextEncoder().encode(input); const digest = await crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(digest)).map((b)=>b.toString(16).padStart(2,"0")).join(""); }
+function detectAccessBlock(raw: string) {
+  const s = String(raw || "");
+  if (/_Incapsula_Resource|\bincapsula\b|\bimperva\b/i.test(s)) return "antibot_incapsula";
+  if (/cf-chl-|challenge-platform|Just a moment(?:\.\.\.)?/i.test(s)) return "antibot_challenge";
+  if (/<title>\s*Access Denied\s*<\/title>|\baccess denied\b/i.test(s) && s.length < 20_000) return "access_denied";
+  return null;
+}
 function titleFromHtml(html: string) { const m=html.match(/<title[^>]*>([\s\S]*?)<\/title>/i); return m ? cleanText(m[1]).slice(0,300) : null; }
 
 function parseRateNumber(raw) {
@@ -359,7 +366,11 @@ Deno.serve(async (req) => {
   async function scanOne(source:any) {
     const oldHash=source.last_hash||null, sourceFingerprintVersion=Number(source.fingerprint_version||0);
     try {
-      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=new TextEncoder().encode(raw).byteLength, text=cleanText(raw), focused=focusText(text), pageTitle=safeDbText(titleFromHtml(raw)||'')||null, structured=extractStructured(source, focused, pageTitle), safeFocused=safeDbText(focused), hash=await sha256(safeFocused);
+      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=new TextEncoder().encode(raw).byteLength, accessBlock=detectAccessBlock(raw), text=cleanText(raw), focused=focusText(text), pageTitle=safeDbText(titleFromHtml(raw)||'')||null;
+      let structured=extractStructured(source, focused, pageTitle);
+      const safeFocused=safeDbText(focused);
+      if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
+      const fingerprintInput=accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused, hash=await sha256(fingerprintInput);
       const isInitial=!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION, isChanged=!isInitial&&oldHash!==hash&&!structured.unsupported;
       const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
       await service.from("scanner_sources").update({ last_checked_at:new Date().toISOString(), last_http_status:loaded.status, last_hash:hash, last_error:null, fingerprint_version:FINGERPRINT_VERSION }).eq("id",source.id);
@@ -380,7 +391,7 @@ Deno.serve(async (req) => {
       if (!candidate && source.source_role==="primary" && (structured.unsupported || safeFocused.trim().length<80)) {
         const {data:existingUnreadable}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_unreadable").eq("new_hash",hash).limit(1);
         if (!existingUnreadable?.length) {
-          const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,auto_publish:false}};
+          const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
           const {data:unreadableCandidate,error:unreadableError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:"official_source_unreadable",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:hash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:unreadablePayload,status:"pending"}).select("id,candidate_type,priority").single();
           if (!unreadableError&&unreadableCandidate) { candidate=unreadableCandidate; candidates++; }
         }
