@@ -32,7 +32,7 @@
       if(p.classList.contains('sf-bank-name-with-logo'))return;
       const wrap=document.createElement('span');wrap.className='sf-bank-name-with-logo';
       const icon=document.createElement('span');icon.className='sf-inline-logo';icon.innerHTML=logoMarkup(name);const im=icon.querySelector('img');if(im)im.addEventListener('error',()=>{icon.innerHTML=svg(name)},{once:true});
-      node.parentNode.insertBefore(wrap,node);wrap.append(icon,node);
+      node.parentNode.insertBefore(wrap,node);wrap.append(icon,node);if(name==='O.Bank')node.nodeValue='Ідея Банк · O.Bank';
     });
   }
   patch();
