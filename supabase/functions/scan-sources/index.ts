@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 29;
+const PARSER_VERSION = 30;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -402,6 +402,21 @@ function extractRadaRewardsCards(html) {
   }
   return {items,valid_from:month.valid_from,valid_to:month.valid_to};
 }
+function extractExplicitMaxCashback(text) {
+  const raw=String(text||"");
+  const patterns=[
+    /Максимальн[\p{L}\p{M}]*\s+сума\s+кешбек[\p{L}\p{M}]*[^\d\n]{0,60}(\d[\d\s]{0,10})\s*(?:грн|₴|грив(?:ень|ні|ня)?)/iu,
+    /Максимальн[\p{L}\p{M}]*\s+сума\s+винагород[\p{L}\p{M}]*[^\d\n]{0,100}(\d[\d\s]{0,10})\s*(?:грн|₴|грив(?:ень|ні|ня)?)/iu,
+    /(?:ліміт|максимум)[^\n]{0,80}?(?:кешбек|винагород)[^\d\n]{0,60}(\d[\d\s]{0,10})\s*(?:грн|₴|грив(?:ень|ні|ня)?)/iu
+  ];
+  for(const re of patterns){
+    const m=raw.match(re);
+    if(!m)continue;
+    const v=Number(m[1].replace(/\s+/g,""));
+    if(Number.isFinite(v)&&v>0&&v<=100000)return v;
+  }
+  return null;
+}
 function safeDbText(s) {
   return String(s || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, " ").replace(/[ \t]+/g, " ");
 }
@@ -779,6 +794,12 @@ async function loadSource(source: any) {
       const focused = focusText(text);
       const pageTitle = loaded.documentType === "pdf" ? (source.purpose || source.bank || "Official PDF") : (safeDbText(titleFromHtml(raw) || '') || null);
       let structured = extractStructured(source, focused, pageTitle);
+      const explicitMaxCashback=extractExplicitMaxCashback(text);
+      if(explicitMaxCashback!==null){
+        const limits={...(structured.limits||{})};
+        const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
+        structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
+      }
       if (source.id === "rada-rewards" && loaded.documentType !== "pdf") {
         const rada=extractRadaRewardsCards(raw);
         if(rada.items.length){
