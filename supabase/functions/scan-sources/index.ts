@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 10;
+const PARSER_VERSION = 11;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -616,6 +616,48 @@ Deno.serve(async (req) => {
             status: "pending",
           }).select("id,candidate_type,priority").single();
           if (!unreadableError && unreadableCandidate) { candidate = unreadableCandidate; candidates++; }
+        }
+      }
+
+      if (!candidate && isInitial && source.source_role === "primary" && source.bank && !structured.unsupported && safeFocused.trim().length >= 80 && (source.publish_policy === "review_required" || Number(structured.item_count || 0) > 0)) {
+        const { data: affected } = await service.from("scanner_matrix_index")
+          .select("cell_key,bank,category,current_value,source_tier,source_url")
+          .eq("bank", source.bank)
+          .eq("source_tier", "reference");
+        if (affected?.length) {
+          const { data: existingBootstrap } = await service.from("scanner_candidates")
+            .select("id")
+            .eq("source_id", source.id)
+            .eq("candidate_type", "reference_to_official_review")
+            .eq("new_hash", hash)
+            .limit(1);
+          if (!existingBootstrap?.length) {
+            const bootstrapPayload = {
+              ...structured,
+              bootstrap_review: {
+                detected_on: new Date().toISOString().slice(0, 10),
+                reason: "official_source_added_for_reference_cells",
+                affected_count: affected.length,
+                auto_publish: false,
+              },
+            };
+            const { data: bootstrapCandidate, error: bootstrapError } = await service.from("scanner_candidates").insert({
+              run_id: run.id,
+              source_id: source.id,
+              bank: source.bank,
+              candidate_type: "reference_to_official_review",
+              priority: "high",
+              source_role: source.source_role,
+              old_hash: oldHash,
+              new_hash: hash,
+              affected_cells: affected,
+              excerpt: safeFocused.slice(0, 6_000),
+              parser_version: PARSER_VERSION,
+              structured_payload: bootstrapPayload,
+              status: "pending",
+            }).select("id,candidate_type,priority").single();
+            if (!bootstrapError && bootstrapCandidate) { candidate = bootstrapCandidate; candidates++; }
+          }
         }
       }
 
