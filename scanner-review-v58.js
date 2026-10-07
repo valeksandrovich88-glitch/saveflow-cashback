@@ -49,7 +49,7 @@
     .sf-field{border-radius:10px;background:#eef4ef;padding:7px 8px;min-width:0}.sf-field span{display:block;font-size:8px;color:#738078;margin-bottom:3px}.sf-field b{display:block;font-size:10px;overflow:hidden;text-overflow:ellipsis}
     .sf-items{display:grid;gap:5px}.sf-item{display:grid;grid-template-columns:minmax(150px,1fr) auto auto;gap:8px;align-items:center;padding:7px 8px;background:#edf4ee;border-radius:9px;font-size:9px}
     .sf-item b{font-size:10px}.sf-item .rate{font-weight:850;color:#235c3d}.sf-item .dates{color:#67766c;white-space:nowrap}
-    .sf-evidence{font-size:9px;color:#66746a;background:#f1f5f1;padding:7px 8px;border-radius:9px;line-height:1.45}.sf-affected{display:grid;gap:5px}.sf-affected-title{font:800 9px/1.2 system-ui;color:#4f6255}.sf-affected-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:9px;background:#fff8e9;border:1px solid #eadcc1;font-size:9px}.sf-affected-row b{font-size:9px}.sf-affected-row span{font-weight:800;color:#7b5521;white-space:nowrap}.sf-affected-more{font-size:8px;color:#748079;padding-left:2px}
+    .sf-evidence{font-size:9px;color:#66746a;background:#f1f5f1;padding:7px 8px;border-radius:9px;line-height:1.45}.sf-affected{display:grid;gap:5px}.sf-affected-title{font:800 9px/1.2 system-ui;color:#4f6255}.sf-affected-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:9px;background:#fff8e9;border:1px solid #eadcc1;font-size:9px}.sf-affected-row b{font-size:9px}.sf-affected-row span{font-weight:800;color:#7b5521;white-space:nowrap}.sf-affected-more{font-size:8px;color:#748079;padding-left:2px}.sf-category-pool{display:flex;gap:5px;flex-wrap:wrap;padding:8px;border-radius:10px;background:#edf4ef}.sf-category-pool-title{width:100%;font:800 9px/1.2 system-ui;color:#4d6254;margin-bottom:1px}.sf-category-pill{display:inline-flex;padding:4px 7px;border-radius:999px;background:#dfece2;color:#31523c;font:750 8px/1 system-ui}
     .sf-candidate-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
     .sf-source-link{color:#245f40;text-decoration:none;font-weight:750}.sf-source-link:hover{text-decoration:underline}
     .sf-note{margin-top:8px;font-size:9px;color:#6b796f;line-height:1.45}
@@ -200,6 +200,7 @@
     const review=p.review_policy||{};
     const expiry=p.expiry_review||{};
     const health=p.source_health||{};
+    const categoryPool=Array.isArray(p.category_pool)?p.category_pool:[];
     const items=Array.isArray(p.items)?p.items:[];
     const shown=items.slice(0,8);
     const limits=p.limits||{};
@@ -235,6 +236,7 @@
           ${expiry.expired_on?`<div class="sf-evidence">Строк дії завершився <b>${esc(fmtShort(expiry.expired_on))}</b>. Сканер лише створив задачу на перевірку; автоматичного видалення немає.</div>`:''}
           ${c.candidate_type==='official_source_unreadable'?`<div class="sf-evidence"><b>Чому не читається:</b> ${esc(healthReason(health.reason||p.reason))}${health.response_bytes!=null?` · відповідь ${esc(health.response_bytes)} байт`:''}${health.transport?` · ${esc(health.transport)}`:''}. Дані з такого джерела не застосовуються автоматично.</div>`:''}
           ${affectedShown.length?`<div class="sf-affected"><div class="sf-affected-title">Reference-комірки, які треба звірити з офіційним джерелом</div>${affectedShown.map(x=>`<div class="sf-affected-row"><b>${esc(x.category||x.cell_key||'Комірка')}</b><span>${esc(x.current_value||'—')}</span></div>`).join('')}${affected.length>affectedShown.length?`<div class="sf-affected-more">Ще ${affected.length-affectedShown.length} комірок не показано у короткому перегляді.</div>`:''}</div>`:''}
+          ${categoryPool.length?`<div class="sf-category-pool"><div class="sf-category-pool-title">Офіційний пул категорій · ставки можуть змінюватися щомісяця</div>${categoryPool.map(x=>`<span class="sf-category-pill">${esc(x)}</span>`).join('')}</div>`:''}
           ${shown.length?`<div class="sf-items">${shown.map(itemHtml).join('')}${items.length>shown.length?`<div class="sf-evidence">Ще ${items.length-shown.length} позицій приховано у короткому перегляді.</div>`:''}</div>`:''}
           ${c.excerpt?`<details><summary style="font-size:9px;cursor:pointer;color:#52665a">Фрагмент джерела</summary><div class="sf-evidence" style="margin-top:6px;white-space:pre-wrap">${esc(String(c.excerpt).slice(0,1800))}</div></details>`:''}
         </div>
