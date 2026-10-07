@@ -9,7 +9,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 4;
-const PARSER_VERSION = 11;
+const PARSER_VERSION = 12;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -223,6 +223,35 @@ function splitTargets(raw) {
     .map(compactLabel)
     .filter(labelLooksLikeCategory)
     .slice(0,8);
+}
+const DEFINED_CATEGORY_POOL = [
+  ["Краса", /(?:^|\n)Краса\s*\(/iu],
+  ["Медицина", /(?:^|\n)Медицина\s*\(/iu],
+  ["Продукти та супермаркети", /(?:^|\n)Продукти(?:\s+та\s+супермаркети)?\s*\(/iu],
+  ["Авто та АЗС", /(?:^|\n)Авто\s+та\s+АЗС\s*\(/iu],
+  ["Одяг та взуття", /(?:^|\n)Одяг\s+та\s+взуття\s*\(/iu],
+  ["Мандри", /(?:^|\n)Мандри\s*\(/iu],
+  ["Розваги та спорт", /(?:^|\n)Розваги\s+та\s+спорт\s*\(/iu],
+  ["Кафе та ресторани", /(?:^|\n)Кафе\s+та\s+ресторани\s*\(/iu],
+  ["Кіно", /(?:^|\n)Кіно\s*\(/iu],
+  ["Таксі", /(?:^|\n)Таксі\s*\(/iu],
+  ["Тварини", /(?:^|\n)Тварини\s*\(/iu],
+  ["Книги", /(?:^|\n)Книги\s*\(/iu],
+  ["Відеоігри", /(?:^|\n)Відеоігри\s*\(/iu],
+  ["Квіти", /(?:^|\n)Квіти\s*\(/iu],
+  ["Фастфуд", /(?:^|\n)Фастфуд\s*\(/iu],
+  ["Техніка", /(?:^|\n)Техніка\s*\(/iu],
+  ["Дитячі товари", /(?:^|\n)Дитячі\s+товари\s*\(/iu],
+  ["Транспорт", /(?:^|\n)Транспорт\s*\(/iu],
+  ["Duty Free", /(?:^|\n)Duty\s*Free\s*\(/iu],
+];
+function extractDefinedCategoryPool(text) {
+  const raw = String(text || "");
+  const pool = [];
+  for (const [name, re] of DEFINED_CATEGORY_POOL) {
+    if (re.test(raw)) pool.push(name);
+  }
+  return pool.length >= 3 ? pool : [];
 }
 function nearestDateWindow(lines, idx) {
   return extractWindow(lines.slice(Math.max(0, idx - 3), Math.min(lines.length, idx + 4)).join(" "));
@@ -490,9 +519,11 @@ Deno.serve(async (req) => {
       const responseBytes = new TextEncoder().encode(raw).byteLength;
       const accessBlock = detectAccessBlock(raw);
       const text = cleanText(raw);
+      const categoryPool = extractDefinedCategoryPool(text);
       const focused = focusText(text);
       const pageTitle = safeDbText(titleFromHtml(raw) || '') || null;
       let structured = extractStructured(source, focused, pageTitle);
+      if (categoryPool.length) structured = { ...structured, category_pool: categoryPool, category_pool_source: "official_definitions" };
       const safeFocused = safeDbText(focused);
       if (accessBlock) {
         structured = {
