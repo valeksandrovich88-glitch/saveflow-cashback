@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 5;
-const PARSER_VERSION = 25;
+const PARSER_VERSION = 26;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -594,6 +594,16 @@ Deno.serve(async (req) => {
     .update({ status: "failed", finished_at: new Date().toISOString(), summary: { reason: "stale_run_auto_closed" } })
     .eq("status", "running")
     .lt("started_at", staleBefore);
+
+  const { data: activeRuns } = await service.from("scanner_runs")
+    .select("id,started_at,trigger_kind")
+    .eq("status", "running")
+    .gte("started_at", staleBefore)
+    .order("started_at", { ascending: false })
+    .limit(1);
+  if (activeRuns?.length) {
+    return json({ status: "already_running", run_id: activeRuns[0].id, started_at: activeRuns[0].started_at, trigger_kind: activeRuns[0].trigger_kind });
+  }
 
   const { data: run, error: runError } = await service.from("scanner_runs").insert({
     triggered_by: user.id,
