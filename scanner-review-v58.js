@@ -131,13 +131,16 @@
 
   function renderOverview(){
     const sources=Object.values(state.sources).filter(x=>x.enabled!==false&&x.source_role==='primary');
-    const manual=sources.filter(x=>x.publish_policy==='manual_only'||x.data_mode==='dynamic'||x.data_mode==='personalized');
     const issues=sources.filter(src=>{
       if(src.last_error)return true;
-      if(src.publish_policy==='manual_only'||src.data_mode==='dynamic'||src.data_mode==='personalized')return false;
-      const snap=state.latestSnapshots[src.id];
-      return !!snap?.structured_payload?.unsupported;
+      const p=state.latestSnapshots[src.id]?.structured_payload||{};
+      if(!p.unsupported)return false;
+      const reason=String(p.reason||'');
+      if(/^(antibot_|access_denied)/.test(reason))return true;
+      return !(src.publish_policy==='manual_only'||src.data_mode==='dynamic'||src.data_mode==='personalized');
     });
+    const issueIds=new Set(issues.map(x=>x.id));
+    const manual=sources.filter(x=>!issueIds.has(x.id)&&(x.publish_policy==='manual_only'||x.data_mode==='dynamic'||x.data_mode==='personalized'));
     const healthy=Math.max(0,sources.length-manual.length-issues.length);
     const healthEl=document.getElementById('sfScanHealth');
     if(healthEl){
