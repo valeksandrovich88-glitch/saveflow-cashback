@@ -49,7 +49,7 @@
     .sf-field{border-radius:10px;background:#eef4ef;padding:7px 8px;min-width:0}.sf-field span{display:block;font-size:8px;color:#738078;margin-bottom:3px}.sf-field b{display:block;font-size:10px;overflow:hidden;text-overflow:ellipsis}
     .sf-items{display:grid;gap:5px}.sf-item{display:grid;grid-template-columns:minmax(150px,1fr) auto auto;gap:8px;align-items:center;padding:7px 8px;background:#edf4ee;border-radius:9px;font-size:9px}
     .sf-item b{font-size:10px}.sf-item .rate{font-weight:850;color:#235c3d}.sf-item .dates{color:#67766c;white-space:nowrap}
-    .sf-evidence{font-size:9px;color:#66746a;background:#f1f5f1;padding:7px 8px;border-radius:9px;line-height:1.45}.sf-affected{display:grid;gap:5px}.sf-affected-title{font:800 9px/1.2 system-ui;color:#4f6255}.sf-affected-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:9px;background:#fff8e9;border:1px solid #eadcc1;font-size:9px}.sf-affected-row b{font-size:9px}.sf-affected-value{font-weight:800;color:#7b5521;white-space:nowrap}.sf-affected-verdict{grid-column:1/-1;font-size:8px;line-height:1.35;color:#69766d}.sf-affected-row.match{background:#eaf6ed;border-color:#c5dec9}.sf-affected-row.match .sf-affected-verdict{color:#2d6941}.sf-affected-row.pool{background:#fff8e9}.sf-affected-row.pool .sf-affected-verdict{color:#7b5b2c}.sf-affected-row.conflict{background:#fae7e7;border-color:#e7c1c1}.sf-affected-row.conflict .sf-affected-verdict{color:#8b3636}.sf-affected-row.unknown{background:#f1f4f1;border-color:#d9e0da}.sf-affected-more{font-size:8px;color:#748079;padding-left:2px}.sf-category-pool{display:flex;gap:5px;flex-wrap:wrap;padding:8px;border-radius:10px;background:#edf4ef}.sf-category-pool-title{width:100%;font:800 9px/1.2 system-ui;color:#4d6254;margin-bottom:1px}.sf-category-pill{display:inline-flex;padding:4px 7px;border-radius:999px;background:#dfece2;color:#31523c;font:750 8px/1 system-ui}
+    .sf-evidence{font-size:9px;color:#66746a;background:#f1f5f1;padding:7px 8px;border-radius:9px;line-height:1.45}.sf-partner-audit{display:grid;gap:7px;padding:9px;border-radius:11px;background:#f2f6f2;border:1px solid #d8e3da}.sf-partner-audit-summary{display:flex;gap:12px;flex-wrap:wrap;font-size:9px;color:#53665a}.sf-partner-audit-summary b{font-size:11px;color:#223c2b}.sf-partner-audit-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px}.sf-partner-audit-col{padding:8px;border-radius:9px;background:white;border:1px solid #dce5de}.sf-partner-audit-col.added{border-color:#bad8c0;background:#f2faf3}.sf-partner-audit-col.missing{border-color:#ead1b5;background:#fff9f1}.sf-partner-audit-title{font:800 9px/1.2 system-ui;margin-bottom:6px}.sf-partner-audit-row{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-top:1px solid rgba(80,100,85,.08);font-size:9px}.sf-partner-audit-row:first-of-type{border-top:0}.sf-partner-audit-row span:last-child{font-weight:800;white-space:nowrap}.sf-affected{display:grid;gap:5px}.sf-affected-title{font:800 9px/1.2 system-ui;color:#4f6255}.sf-affected-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:9px;background:#fff8e9;border:1px solid #eadcc1;font-size:9px}.sf-affected-row b{font-size:9px}.sf-affected-value{font-weight:800;color:#7b5521;white-space:nowrap}.sf-affected-verdict{grid-column:1/-1;font-size:8px;line-height:1.35;color:#69766d}.sf-affected-row.match{background:#eaf6ed;border-color:#c5dec9}.sf-affected-row.match .sf-affected-verdict{color:#2d6941}.sf-affected-row.pool{background:#fff8e9}.sf-affected-row.pool .sf-affected-verdict{color:#7b5b2c}.sf-affected-row.conflict{background:#fae7e7;border-color:#e7c1c1}.sf-affected-row.conflict .sf-affected-verdict{color:#8b3636}.sf-affected-row.unknown{background:#f1f4f1;border-color:#d9e0da}.sf-affected-more{font-size:8px;color:#748079;padding-left:2px}.sf-category-pool{display:flex;gap:5px;flex-wrap:wrap;padding:8px;border-radius:10px;background:#edf4ef}.sf-category-pool-title{width:100%;font:800 9px/1.2 system-ui;color:#4d6254;margin-bottom:1px}.sf-category-pill{display:inline-flex;padding:4px 7px;border-radius:999px;background:#dfece2;color:#31523c;font:750 8px/1 system-ui}
     .sf-candidate-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
     .sf-source-link{color:#245f40;text-decoration:none;font-weight:750}.sf-source-link:hover{text-decoration:underline}
     .sf-note{margin-top:8px;font-size:9px;color:#6b796f;line-height:1.45}
@@ -57,7 +57,7 @@
     @media(max-width:760px){
       .sf-scan-review-backdrop{padding:8px}.sf-scan-review{max-height:95vh;border-radius:14px}.sf-scan-head{padding:14px;flex-direction:column}.sf-scan-actions{justify-content:flex-start}
       .sf-scan-summary{grid-template-columns:repeat(2,minmax(0,1fr));padding:10px 14px}.sf-scan-overview{grid-template-columns:1fr;padding:0 14px 10px}.sf-scan-tabs{padding:0 14px 10px}.sf-scan-body{padding:0 14px 14px}
-      .sf-structured-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-item{grid-template-columns:1fr auto}.sf-item .dates{grid-column:1/-1}
+      .sf-structured-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sf-partner-audit-cols{grid-template-columns:1fr}.sf-item{grid-template-columns:1fr auto}.sf-item .dates{grid-column:1/-1}
     }
   `;
   document.head.appendChild(st);
@@ -114,6 +114,7 @@
   const humanType=(c)=>{
     if(c.candidate_type==='official_source_expired') return 'Офіційна пропозиція завершилася';
     if(c.candidate_type==='official_source_unreadable') return 'Офіційне джерело недоступне сканеру';
+    if(c.candidate_type==='partner_roster_changed') return 'Змінився список партнерів';
     if(c.candidate_type==='dynamic_or_personalized_source_changed') return 'Зміни у персоналізованому джерелі';
     if(c.candidate_type==='reference_to_official_review') return 'Є офіційне джерело для перевірки';
     if(c.candidate_type==='reference_change_signal') return 'Сигнал з довідкового джерела';
@@ -256,6 +257,9 @@
     const review=p.review_policy||{};
     const expiry=p.expiry_review||{};
     const health=p.source_health||{};
+    const partnerAudit=p.partner_audit||{};
+    const partnerAdded=Array.isArray(partnerAudit.added_partners)?partnerAudit.added_partners:[];
+    const partnerMissing=Array.isArray(partnerAudit.missing_partners)?partnerAudit.missing_partners:[];
     const categoryPool=Array.isArray(p.category_pool)?p.category_pool:[];
     const items=Array.isArray(p.items)?p.items:[];
     const shown=items.slice(0,8);
@@ -294,9 +298,21 @@
           </div>
           ${expiry.expired_on?`<div class="sf-evidence">Строк дії завершився <b>${esc(fmtShort(expiry.expired_on))}</b>. Сканер лише створив задачу на перевірку; автоматичного видалення немає.</div>`:''}
           ${c.candidate_type==='official_source_unreadable'?`<div class="sf-evidence"><b>Чому не читається:</b> ${esc(healthReason(health.reason||p.reason))}${health.response_bytes!=null?` · відповідь ${esc(health.response_bytes)} байт`:''}${health.transport?` · ${esc(health.transport)}`:''}. Дані з такого джерела не застосовуються автоматично.</div>`:''}
+          ${c.candidate_type==='partner_roster_changed'?`<div class="sf-partner-audit">
+            <div class="sf-partner-audit-summary">
+              <span>Офіційно: <b>${esc(partnerAudit.official_count??'—')}</b></span>
+              <span>У SaveFlow: <b>${esc(partnerAudit.indexed_count??'—')}</b></span>
+              <span>Збіглося: <b>${esc(partnerAudit.matched_count??'—')}</b></span>
+            </div>
+            <div class="sf-partner-audit-cols">
+              <div class="sf-partner-audit-col added"><div class="sf-partner-audit-title">Нові партнери · +${partnerAdded.length}</div>${partnerAdded.length?partnerAdded.map(x=>`<div class="sf-partner-audit-row"><span>${esc(x)}</span><span>новий</span></div>`).join(''):'<div class="sf-evidence">Нових партнерів немає.</div>'}</div>
+              <div class="sf-partner-audit-col missing"><div class="sf-partner-audit-title">Ймовірно вибули · −${partnerMissing.length}</div>${partnerMissing.length?partnerMissing.map(x=>`<div class="sf-partner-audit-row"><span>${esc(x.name||x)}</span><span>${esc(x.current_value||'—')}</span></div>`).join(''):'<div class="sf-evidence">Нічого не вибуло.</div>'}</div>
+            </div>
+            <div class="sf-evidence">Сканер нічого не видаляє автоматично. Для нових партнерів без відкритої ставки картку не публікуємо, доки не підтвердимо %.</div>
+          </div>`:''}
           ${affectedShown.length?`<div class="sf-affected"><div class="sf-affected-title">Reference-комірки, які треба звірити з офіційним джерелом</div>${affectedAssessed.map(({cell:x,verdict})=>`<div class="sf-affected-row ${esc(verdict.cls)}"><b>${esc(x.category||x.cell_key||'Комірка')}</b><span class="sf-affected-value">${esc(x.current_value||'—')}</span><div class="sf-affected-verdict">${esc(verdict.label)}</div></div>`).join('')}${affected.length>affectedShown.length?`<div class="sf-affected-more">Ще ${affected.length-affectedShown.length} комірок не показано у короткому перегляді.</div>`:''}</div>`:''}
           ${categoryPool.length?`<div class="sf-category-pool"><div class="sf-category-pool-title">Офіційний пул категорій · ставки можуть змінюватися щомісяця</div>${categoryPool.map(x=>`<span class="sf-category-pill">${esc(x)}</span>`).join('')}</div>`:''}
-          ${shown.length?`<div class="sf-items">${shown.map(itemHtml).join('')}${items.length>shown.length?`<div class="sf-evidence">Ще ${items.length-shown.length} позицій приховано у короткому перегляді.</div>`:''}</div>`:''}
+          ${c.candidate_type!=='partner_roster_changed'&&shown.length?`<div class="sf-items">${shown.map(itemHtml).join('')}${items.length>shown.length?`<div class="sf-evidence">Ще ${items.length-shown.length} позицій приховано у короткому перегляді.</div>`:''}</div>`:''}
           ${c.excerpt?`<details><summary style="font-size:9px;cursor:pointer;color:#52665a">Фрагмент джерела</summary><div class="sf-evidence" style="margin-top:6px;white-space:pre-wrap">${esc(String(c.excerpt).slice(0,1800))}</div></details>`:''}
         </div>
         <div class="sf-note">${esc(autoNote)}</div>
