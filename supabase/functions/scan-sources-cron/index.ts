@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 36;
+const PARSER_VERSION = 37;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -375,6 +375,68 @@ function mergePumbPartnerRoster(structured, rawHtml) {
     partner_roster_count: roster.length,
     partner_roster_source: "official_embedded_partnersList",
     confidence: roster.length >= 20 ? "review_ready" : (structured?.confidence || "signal_only")
+  };
+}
+
+function partnerRosterKey(s) {
+  return String(s || "")
+    .toLocaleLowerCase("uk-UA")
+    .replace(/[’'`]/g, "")
+    .replace(/[^a-zа-яіїєґ0-9]+/giu, "");
+}
+
+async function buildPartnerRosterAudit(service, structured, bank) {
+  const officialNames = [...new Set(
+    (Array.isArray(structured?.items) ? structured.items : [])
+      .filter((item) => item?.kind === "partner" && (item?.partner || item?.name))
+      .map((item) => String(item.partner || item.name).trim())
+      .filter(Boolean)
+  )];
+
+  const { data: rows, error } = await service
+    .from("scanner_partner_index")
+    .select("partner_key,partner_name,aliases,category,current_value,rate_percent,source_url")
+    .eq("bank", bank)
+    .eq("active", true);
+  if (error) throw new Error("Partner index read failed: " + error.message);
+
+  const indexRows = rows || [];
+  const keyToRow = new Map();
+  for (const row of indexRows) {
+    const keys = [row.partner_name, ...(Array.isArray(row.aliases) ? row.aliases : [])]
+      .map(partnerRosterKey)
+      .filter(Boolean);
+    for (const key of keys) if (!keyToRow.has(key)) keyToRow.set(key, row);
+  }
+
+  const matched = new Set();
+  const added = [];
+  for (const name of officialNames) {
+    const row = keyToRow.get(partnerRosterKey(name));
+    if (row) matched.add(row.partner_key);
+    else added.push(name);
+  }
+
+  const missing = indexRows
+    .filter((row) => !matched.has(row.partner_key))
+    .map((row) => ({
+      name: row.partner_name,
+      category: row.category || null,
+      current_value: row.current_value || null,
+      rate_percent: row.rate_percent == null ? null : Number(row.rate_percent),
+      source_url: row.source_url || null,
+    }));
+
+  return {
+    bank,
+    official_count: officialNames.length,
+    indexed_count: indexRows.length,
+    matched_count: matched.size,
+    added_partners: added.sort((a,b)=>a.localeCompare(b,"uk")),
+    missing_partners: missing.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
+    changed: added.length > 0 || missing.length > 0,
+    detected_on: new Date().toISOString().slice(0,10),
+    auto_publish: false,
   };
 }
 
@@ -826,6 +888,11 @@ async function loadSource(source: any) {
       }
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
+      let partnerRosterAudit: any = null;
+      if(source.id==="pumb-cashback"&&!structured.unsupported){
+        partnerRosterAudit=await buildPartnerRosterAudit(service,structured,"ПУМБ");
+        structured={...structured,partner_audit:partnerRosterAudit};
+      }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
       const isInitial=!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION, isChanged=!isInitial&&oldHash!==hash&&!structured.unsupported;
       const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
@@ -843,7 +910,19 @@ async function loadSource(source: any) {
         await service.from("scanner_candidates").update(updatePayload).eq("id",pendingEvidence[0].id);
       }
       let candidate:any=null;
-      if (isChanged) {
+      if(partnerRosterAudit){
+        const auditHash=await sha256(JSON.stringify({added:partnerRosterAudit.added_partners,missing:partnerRosterAudit.missing_partners.map((x:any)=>x.name)}));
+        if(partnerRosterAudit.changed){
+          const {data:existingRoster}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("new_hash",auditHash).eq("status","pending").limit(1);
+          if(!existingRoster?.length){
+            const {data:rosterCandidate,error:rosterError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||"ПУМБ",candidate_type:"partner_roster_changed",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:auditHash,affected_cells:[],excerpt:`Офіційний roster ПУМБ: +${partnerRosterAudit.added_partners.length} / -${partnerRosterAudit.missing_partners.length}`,parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"}).select("id,candidate_type,priority").single();
+            if(!rosterError&&rosterCandidate){candidate=rosterCandidate;candidates++;}
+          }
+        }else{
+          await service.from("scanner_candidates").update({status:"reviewed",review_note:"Автоматично закрито: офіційний roster партнерів знову збігається з partner index.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("status","pending");
+        }
+      }
+      if (isChanged && !candidate) {
         changed++;
         let affected:any[]=[], type=source.source_role==="reference"?"reference_change_signal":"official_source_changed", priority=source.source_role==="reference"?"low":"normal";
         if (source.source_role==="reference") {
