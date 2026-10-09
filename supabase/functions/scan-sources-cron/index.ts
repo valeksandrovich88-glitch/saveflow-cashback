@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 38;
+const PARSER_VERSION = 39;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -488,6 +488,54 @@ function normalizeSenseMonthlyStructured(text, structured, resolvedUrl) {
     partner_roster_source: "official_monthly_cashu_article",
     confidence: roster.length >= 10 ? "review_ready" : "signal_only",
   };
+}
+
+
+function vstPartnerCategory(name) {
+  const x = String(name || "").toLocaleLowerCase("uk-UA");
+  if (/брсм|neftek|нефтек/iu.test(x)) return "АЗС";
+  if (/e-zoo|zoo/iu.test(x)) return "Тварини";
+  if (/concert|сoncert/iu.test(x)) return "Розваги";
+  if (/apollo/iu.test(x)) return "Спорт";
+  if (/clinic|клінік/iu.test(x)) return "Медицина";
+  if (/дека|секунда/iu.test(x)) return "Ювелірні вироби";
+  if (/myplay/iu.test(x)) return "Дитячі товари";
+  return null;
+}
+
+function extractVstPartnerRoster(text) {
+  const lines = String(text || "").split(/\n+/).map(compactLabel).filter(Boolean);
+  const start = lines.findIndex((x) => /^Кешбек\s+від\s+партнерів$/iu.test(x));
+  if (start < 0) return [];
+  const items = [];
+  const seen = new Set();
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^(?:Відкрити\s+картку|Ми\s+використовуємо\s+файли\s+cookie)/iu.test(line)) break;
+    const m = line.match(/^(.{2,70}?)\s+(\d{1,3}(?:[.,]\d+)?)\s*%(?:\s+.*)?$/u);
+    if (!m) continue;
+    const name = compactLabel(m[1]).replace(/[«»"]/g,"").trim();
+    const rate = parseRateNumber(m[2]);
+    if (!name || rate === null || /(?:максимальн|кешбек|партнерськ)/iu.test(name)) continue;
+    const key = name.toLocaleLowerCase("uk-UA").replace(/[^a-zа-яіїєґ0-9]+/giu,"");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      kind: "partner", name, partner: name, category: vstPartnerCategory(name),
+      rate_percent: rate, rate_text: String(rate).replace(".",",") + "%",
+      current_value: String(rate).replace(".",",") + "%", valid_from: null, valid_to: null,
+      evidence: [line.slice(0,500)], conditions: []
+    });
+  }
+  return items;
+}
+
+function normalizeVstPartnerStructured(text, structured) {
+  const roster = extractVstPartnerRoster(text);
+  return {...structured,items:roster,item_count:roster.length,
+    rates_percent:uniqNumbers(roster.map((x)=>x.rate_percent).filter((x)=>x!==null)),
+    partner_roster_count:roster.length,partner_roster_source:"official_vst_partner_page",
+    confidence:roster.length>=5?"review_ready":"signal_only"};
 }
 
 function partnerRosterKey(s) {
@@ -1045,6 +1093,7 @@ async function loadSource(source: any) {
         if(source.id==="creditdnepr-cashback") structured=normalizeCreditDniproStructured(text,structured);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
+        if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
@@ -1066,7 +1115,7 @@ async function loadSource(source: any) {
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":null);
+      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":null));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
