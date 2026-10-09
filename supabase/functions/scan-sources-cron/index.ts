@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 37;
+const PARSER_VERSION = 38;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -378,6 +378,118 @@ function mergePumbPartnerRoster(structured, rawHtml) {
   };
 }
 
+
+const SENSE_MONTH_NAMES = [
+  "січень","лютий","березень","квітень","травень","червень",
+  "липень","серпень","вересень","жовтень","листопад","грудень"
+];
+
+function currentMonthWindow(now = new Date()) {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return {
+    valid_from: y + "-" + String(m).padStart(2,"0") + "-01",
+    valid_to: y + "-" + String(m).padStart(2,"0") + "-" + String(last).padStart(2,"0"),
+  };
+}
+
+function sensePartnerCategory(line) {
+  const x = compactLabel(line).toLocaleLowerCase("uk-UA");
+  const defs = [
+    ["Маркетплейси", /^маркетплейс(?:и)?$/u],
+    ["Одяг та взуття", /^одяг[,\s]+взуття(?:[,\s]+аксесуари)?$/u],
+    ["Аксесуари / багаж", /^аксесуари[,\s]+валізи$/u],
+    ["Краса", /^(?:beauty|краса)$/u],
+    ["Онлайн-сервіси", /^онлайн\s*сервіс(?:и)?$/u],
+    ["Техніка", /^техніка\s+та\s+електроніка$/u],
+    ["Дитячі товари", /^дитячі\s+товари$/u],
+    ["Тварини", /^товари\s+для\s+тварин$/u],
+    ["Книги та канцтовари", /^книгарні$/u],
+    ["Транспорт", /^транспорт$/u],
+    ["Медицина", /^медицина$/u],
+    ["Сад та город", /^сад\s+та\s+город$/u],
+    ["Аптеки", /^аптеки$/u],
+    ["Дім та ремонт", /^все\s+для\s+дому$/u],
+    ["Спорт", /^спорт\s+і\s+фітнес$/u],
+    ["Кафе та ресторани", /^кафе\s+і\s+ресторани$/u],
+    ["Продукти", /^продукти$/u],
+    ["Дім та ремонт", /^обладнання[,\s]+інструмент$/u],
+    ["Спорт", /^туризм[,\s]+військове\s+обладнання(?:\s+та\s+спорядження)?$/u],
+    ["Ювелірні вироби", /^ювелірні\s+вироби$/u],
+    ["Доставка", /^доставка$/u],
+  ];
+  for (const [name,re] of defs) if (re.test(x)) return name;
+  return null;
+}
+
+function extractSenseMonthlyPartnerRoster(text) {
+  const lines = String(text || "").split(/\n+/).map(compactLabel).filter(Boolean);
+  const start = lines.findIndex((x) => /спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер\p{L}*.*(?:поточн|цього|у\s+)?(?:місяц|20\d{2})/iu.test(x)
+    || /спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер\p{L}*.*Cash.?u\s*Club/iu.test(x));
+  if (start < 0) return [];
+  const month = currentMonthWindow();
+  const items = [];
+  const seen = new Set();
+  let category = null;
+
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^Користуйтеся\s+вигідними\s+пропозиціями/iu.test(line)) break;
+    const heading = sensePartnerCategory(line);
+    if (heading) { category = heading; continue; }
+    if (!/кешбек/iu.test(line)) continue;
+
+    const m = line.match(/^(.{2,90}?)\s*[–—-]\s*(.+)$/u);
+    if (!m) continue;
+    let name = compactLabel(m[1]).replace(/[«»"]/g,"").trim();
+    const offer = compactLabel(m[2]);
+    if (!name || /^(?:кешбек|спеціальні\s+пропозиції|розіграші)$/iu.test(name)) continue;
+
+    const pctMatches = [...offer.matchAll(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*кешбек\p{L}*/giu)];
+    const pct = pctMatches.length ? parseRateNumber(pctMatches[pctMatches.length - 1][1]) : null;
+    const fixed = offer.match(/(?:фіксован\p{L}*\s*)?кешбек\p{L}*\s*[–—-]?\s*(\d[\d\s]{0,6})\s*бонус/iu);
+    const fixedValue = fixed ? Number(String(fixed[1]).replace(/\s+/g,"")) : null;
+    if (pct === null && !(Number.isFinite(fixedValue) && fixedValue > 0)) continue;
+
+    const key = name.toLocaleLowerCase("uk-UA").replace(/[^a-zа-яіїєґ0-9]+/giu,"");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const currentValue = pct !== null ? (String(pct).replace(".",",") + "%") : (fixedValue + " бонусів / чек");
+    items.push({
+      kind: "partner",
+      name,
+      partner: name,
+      category,
+      rate_percent: pct,
+      rate_text: currentValue,
+      current_value: currentValue,
+      valid_from: month.valid_from,
+      valid_to: month.valid_to,
+      evidence: [line.slice(0,500)],
+      conditions: [offer.slice(0,500)],
+    });
+  }
+  return items;
+}
+
+function normalizeSenseMonthlyStructured(text, structured, resolvedUrl) {
+  const roster = extractSenseMonthlyPartnerRoster(text);
+  const month = currentMonthWindow();
+  return {
+    ...structured,
+    source_url: resolvedUrl || structured?.source_url || null,
+    resolved_source_url: resolvedUrl || null,
+    items: roster,
+    item_count: roster.length,
+    rates_percent: uniqNumbers(roster.map((x) => x.rate_percent).filter((x) => x !== null)),
+    valid_from: month.valid_from,
+    valid_to: month.valid_to,
+    partner_roster_count: roster.length,
+    partner_roster_source: "official_monthly_cashu_article",
+    confidence: roster.length >= 10 ? "review_ready" : "signal_only",
+  };
+}
+
 function partnerRosterKey(s) {
   return String(s || "")
     .toLocaleLowerCase("uk-UA")
@@ -386,12 +498,20 @@ function partnerRosterKey(s) {
 }
 
 async function buildPartnerRosterAudit(service, structured, bank) {
-  const officialNames = [...new Set(
-    (Array.isArray(structured?.items) ? structured.items : [])
-      .filter((item) => item?.kind === "partner" && (item?.partner || item?.name))
-      .map((item) => String(item.partner || item.name).trim())
-      .filter(Boolean)
-  )];
+  const officialItems = [];
+  const seenOfficial = new Set();
+  for (const item of (Array.isArray(structured?.items) ? structured.items : [])) {
+    if (item?.kind !== "partner" || !(item?.partner || item?.name)) continue;
+    const name = String(item.partner || item.name).trim();
+    const key = partnerRosterKey(name);
+    if (!name || !key || seenOfficial.has(key)) continue;
+    seenOfficial.add(key);
+    officialItems.push({
+      name,
+      rate_percent: item?.rate_percent == null ? null : Number(item.rate_percent),
+      current_value: item?.current_value || item?.rate_text || null,
+    });
+  }
 
   const { data: rows, error } = await service
     .from("scanner_partner_index")
@@ -411,10 +531,22 @@ async function buildPartnerRosterAudit(service, structured, bank) {
 
   const matched = new Set();
   const added = [];
-  for (const name of officialNames) {
-    const row = keyToRow.get(partnerRosterKey(name));
-    if (row) matched.add(row.partner_key);
-    else added.push(name);
+  const changedRates = [];
+  for (const item of officialItems) {
+    const row = keyToRow.get(partnerRosterKey(item.name));
+    if (!row) { added.push(item.name); continue; }
+    matched.add(row.partner_key);
+    const oldRate = row.rate_percent == null ? null : Number(row.rate_percent);
+    const newRate = item.rate_percent == null ? null : Number(item.rate_percent);
+    if (oldRate !== null && newRate !== null && Math.abs(oldRate - newRate) > 0.0001) {
+      changedRates.push({name:row.partner_name,old_value:(oldRate + "%"),new_value:(newRate + "%")});
+      continue;
+    }
+    const oldValue = String(row.current_value || "").replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+    const newValue = String(item.current_value || "").replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+    if (oldRate === null && newRate === null && oldValue && newValue && oldValue !== newValue) {
+      changedRates.push({name:row.partner_name,old_value:row.current_value,new_value:item.current_value});
+    }
   }
 
   const missing = indexRows
@@ -429,12 +561,13 @@ async function buildPartnerRosterAudit(service, structured, bank) {
 
   return {
     bank,
-    official_count: officialNames.length,
+    official_count: officialItems.length,
     indexed_count: indexRows.length,
     matched_count: matched.size,
     added_partners: added.sort((a,b)=>a.localeCompare(b,"uk")),
     missing_partners: missing.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
-    changed: added.length > 0 || missing.length > 0,
+    changed_rates: changedRates.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
+    changed: added.length > 0 || missing.length > 0 || changedRates.length > 0,
     detected_on: new Date().toISOString().slice(0,10),
     auto_publish: false,
   };
@@ -835,9 +968,52 @@ async function loadMastercardSubscriptionSource() {
   };
 }
 
+
+async function loadSenseMonthlyPartnersSource() {
+  const root = "https://sensebank.ua";
+  const headers = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+  };
+  const hubRes = await fetch(root + "/cash-u", { redirect:"follow", headers, signal:AbortSignal.timeout(15000) });
+  if (!hubRes.ok) throw new Error("Sense Cash'u hub HTTP " + hubRes.status);
+  const hubHtml = await hubRes.text();
+  const monthName = SENSE_MONTH_NAMES[new Date().getUTCMonth()];
+  let articleUrl = "";
+  for (const m of hubHtml.matchAll(/<a\b[^>]*href=["']([^"']*\/cash-u-news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)) {
+    const label = cleanText(m[2]).toLocaleLowerCase("uk-UA");
+    if (label.includes(monthName) && /cash.?u\s*club/iu.test(label)) {
+      articleUrl = new URL(m[1], root).toString();
+      break;
+    }
+  }
+  if (!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
+  const articleRes = await fetch(articleUrl, { redirect:"follow", headers, signal:AbortSignal.timeout(15000) });
+  if (!articleRes.ok) throw new Error("Sense monthly article HTTP " + articleRes.status);
+  const articleHtml = await articleRes.text();
+  if (!/Спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер/iu.test(cleanText(articleHtml))) {
+    throw new Error("Sense monthly partner section not found");
+  }
+  return {
+    status: articleRes.status,
+    raw: articleHtml,
+    responseBytes: new TextEncoder().encode(articleHtml).byteLength,
+    documentType: "html",
+    contentType: String(articleRes.headers.get("content-type") || "text/html"),
+    transport: "sense_monthly_article",
+    resolvedUrl: articleUrl,
+  };
+}
+
 async function loadSource(source: any) {
     if (source.id === "oschad-subscriptions-rules") {
       return await loadMastercardSubscriptionSource();
+    }
+    if (source.id === "sense-partners-monthly") {
+      return await loadSenseMonthlyPartnersSource();
     }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
@@ -868,6 +1044,7 @@ async function loadSource(source: any) {
         text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
         if(source.id==="creditdnepr-cashback") structured=normalizeCreditDniproStructured(text,structured);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
+        if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
@@ -886,11 +1063,12 @@ async function loadSource(source: any) {
           structured={...structured,items:merged,item_count:merged.length,valid_from:rada.valid_from||structured.valid_from,valid_to:rada.valid_to||structured.valid_to,confidence:"review_ready"};
         }
       }
-      structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null};
+      structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      if(source.id==="pumb-cashback"&&!structured.unsupported){
-        partnerRosterAudit=await buildPartnerRosterAudit(service,structured,"ПУМБ");
+      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":null);
+      if(partnerAuditBank&&!structured.unsupported){
+        partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
       }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
@@ -911,11 +1089,11 @@ async function loadSource(source: any) {
       }
       let candidate:any=null;
       if(partnerRosterAudit){
-        const auditHash=await sha256(JSON.stringify({added:partnerRosterAudit.added_partners,missing:partnerRosterAudit.missing_partners.map((x:any)=>x.name)}));
+        const auditHash=await sha256(JSON.stringify({added:partnerRosterAudit.added_partners,missing:partnerRosterAudit.missing_partners.map((x:any)=>x.name),changed_rates:partnerRosterAudit.changed_rates||[]}));
         if(partnerRosterAudit.changed){
           const {data:existingRoster}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("new_hash",auditHash).limit(1);
           if(!existingRoster?.length){
-            const {data:rosterCandidate,error:rosterError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||"ПУМБ",candidate_type:"partner_roster_changed",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:auditHash,affected_cells:[],excerpt:`Офіційний roster ПУМБ: +${partnerRosterAudit.added_partners.length} / -${partnerRosterAudit.missing_partners.length}`,parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"}).select("id,candidate_type,priority").single();
+            const {data:rosterCandidate,error:rosterError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||partnerAuditBank,candidate_type:"partner_roster_changed",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:auditHash,affected_cells:[],excerpt:`Офіційний roster ${partnerAuditBank}: +${partnerRosterAudit.added_partners.length} / -${partnerRosterAudit.missing_partners.length} / ставки Δ${(partnerRosterAudit.changed_rates||[]).length}`,parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"}).select("id,candidate_type,priority").single();
             if(!rosterError&&rosterCandidate){candidate=rosterCandidate;candidates++;}
           }
         }else{
