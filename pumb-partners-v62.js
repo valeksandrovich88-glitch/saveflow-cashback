@@ -127,6 +127,8 @@
     const frag=document.createDocumentFragment();
     OFFERS.forEach(o=>frag.appendChild(makeCard(o)));
     grid.appendChild(frag);
+    section.dataset.sfPumbOffers=String(OFFERS.length);
+    section.dataset.sfPumbLoaded='1';
     apply();
     return true;
   }
