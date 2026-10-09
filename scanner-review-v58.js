@@ -114,6 +114,8 @@
   const humanType=(c)=>{
     if(c.candidate_type==='official_source_expired') return 'Офіційна пропозиція завершилася';
     if(c.candidate_type==='official_source_unreadable') return 'Офіційне джерело недоступне сканеру';
+    if(c.candidate_type==='official_monthly_source_stale') return 'Місячна сторінка не оновлена';
+    if(c.candidate_type==='official_monthly_source_inconsistent') return 'Місячна сторінка містить суперечливі періоди';
     if(c.candidate_type==='partner_roster_changed') return 'Змінився список партнерів';
     if(c.candidate_type==='dynamic_or_personalized_source_changed') return 'Зміни у персоналізованому джерелі';
     if(c.candidate_type==='reference_to_official_review') return 'Є офіційне джерело для перевірки';
@@ -256,6 +258,7 @@
     const p=c.structured_payload||{};
     const review=p.review_policy||{};
     const expiry=p.expiry_review||{};
+    const monthly=p.monthly_source_review||{};
     const health=p.source_health||{};
     const partnerAudit=p.partner_audit||{};
     const partnerAdded=Array.isArray(partnerAudit.added_partners)?partnerAudit.added_partners:[];
@@ -290,6 +293,8 @@
             <span class="sf-chip ${c.priority==='high'?'high':''}">${esc(c.priority||'normal')}</span>
             ${c.candidate_type==='official_source_expired'?'<span class="sf-chip expired">expired</span>':''}
             ${c.candidate_type==='official_source_unreadable'?'<span class="sf-chip unavailable">source unavailable</span>':''}
+            ${c.candidate_type==='official_monthly_source_stale'?'<span class="sf-chip expired">stale month</span>':''}
+            ${c.candidate_type==='official_monthly_source_inconsistent'?'<span class="sf-chip unavailable">month conflict</span>':''}
             ${reference?'<span class="sf-chip reference">reference only</span>':''}
           </div>
         </div>
@@ -302,6 +307,7 @@
           </div>
           ${expiry.expired_on?`<div class="sf-evidence">Строк дії завершився <b>${esc(fmtShort(expiry.expired_on))}</b>. Сканер лише створив задачу на перевірку; автоматичного видалення немає.</div>`:''}
           ${c.candidate_type==='official_source_unreadable'?`<div class="sf-evidence"><b>Чому не читається:</b> ${esc(healthReason(health.reason||p.reason))}${health.response_bytes!=null?` · відповідь ${esc(health.response_bytes)} байт`:''}${health.transport?` · ${esc(health.transport)}`:''}. Дані з такого джерела не застосовуються автоматично.</div>`:''}
+          ${(c.candidate_type==='official_monthly_source_stale'||c.candidate_type==='official_monthly_source_inconsistent')?`<div class="sf-evidence"><b>Поточний період:</b> ${esc(monthly.current_period||'—')} · <b>на сторінці:</b> ${esc((monthly.detected_periods||[]).join(', ')||'—')}<br>${(monthly.evidence||[]).map(esc).join('<br>')}<br>Такі дані не застосовуються автоматично, доки офіційна сторінка не буде узгоджена з поточним місяцем.</div>`:''}
           ${c.candidate_type==='partner_roster_changed'?`<div class="sf-partner-audit">
             <div class="sf-partner-audit-summary">
               <span>Офіційно: <b>${esc(partnerAudit.official_count??'—')}</b></span>
