@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 40;
+const PARSER_VERSION = 41;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -613,6 +613,54 @@ function mergeCreditDniproPartnerRoster(structured, rawHtml) {
   };
 }
 
+
+function extractGlobusPartnerRoster(text) {
+  const lines=String(text||"").split(/\n+/).map(compactLabel).filter(Boolean);
+  const items=[],seen=new Set();
+  for(let i=0;i<lines.length;i++){
+    if(!/^OnTax[iі]$/iu.test(lines[i])) continue;
+    const window=lines.slice(i,Math.min(lines.length,i+12));
+    const rateLine=window.find((x)=>/^\d{1,3}(?:[.,]\d+)?\s*%$/u.test(x));
+    const rate=rateLine?parseRateNumber(rateLine):null;
+    if(rate===null) continue;
+    const name="OnTaxi";
+    const key=partnerRosterKey(name);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const desc=window.find((x)=>/всеукраїнськ.*онлайн-сервіс.*замовлення авто/iu.test(x))||"";
+    items.push({
+      kind:"partner",
+      name,
+      partner:name,
+      category:"Таксі",
+      rate_percent:rate,
+      rate_text:String(rate).replace(".",",")+"%",
+      current_value:String(rate).replace(".",",")+"%",
+      valid_from:null,
+      valid_to:null,
+      evidence:[...new Set([lines[i],desc,rateLine].filter(Boolean))].slice(0,3),
+      conditions:desc?[desc]:[]
+    });
+  }
+  return items;
+}
+
+function normalizeGlobusPartnerStructured(text,structured){
+  const roster=extractGlobusPartnerRoster(text);
+  const existing=Array.isArray(structured?.items)?structured.items:[];
+  const nonPartners=existing.filter((x)=>x?.kind!=="partner");
+  return {
+    ...structured,
+    items:[...nonPartners,...roster],
+    item_count:nonPartners.length+roster.length,
+    partner_roster_count:roster.length,
+    partner_roster_source:"official_visible_partner_cards",
+    partner_roster_complete:false,
+    partner_roster_note:"Офіційна сторінка підтверджує видимі партнерські картки, але не гарантує повний roster; відсутні партнери не вважаються такими, що вибули.",
+    confidence:roster.length?"review_ready":(structured?.confidence||"signal_only")
+  };
+}
+
 function partnerRosterKey(s) {
   return String(s || "")
     .toLocaleLowerCase("uk-UA")
@@ -672,7 +720,8 @@ async function buildPartnerRosterAudit(service, structured, bank) {
     }
   }
 
-  const missing = indexRows
+  const rosterComplete = structured?.partner_roster_complete !== false;
+  const missing = (rosterComplete ? indexRows : [])
     .filter((row) => !matched.has(row.partner_key))
     .map((row) => ({
       name: row.partner_name,
@@ -690,6 +739,8 @@ async function buildPartnerRosterAudit(service, structured, bank) {
     added_partners: added.sort((a,b)=>a.localeCompare(b,"uk")),
     missing_partners: missing.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
     changed_rates: changedRates.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
+    roster_complete: rosterComplete,
+    roster_note: structured?.partner_roster_note || null,
     changed: added.length > 0 || missing.length > 0 || changedRates.length > 0,
     detected_on: new Date().toISOString().slice(0,10),
     auto_publish: false,
@@ -1169,6 +1220,7 @@ async function loadSource(source: any) {
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
+        if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
         hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
@@ -1190,7 +1242,7 @@ async function loadSource(source: any) {
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":null)));
+      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":null))));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
