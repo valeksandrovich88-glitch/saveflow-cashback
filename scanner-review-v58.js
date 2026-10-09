@@ -156,6 +156,12 @@
     const m=String(s||'').replace(',','.').match(/(\d+(?:\.\d+)?)\s*%/);
     return m?Number(m[1]):null;
   };
+  const percentValues=(s)=>[...String(s||'').replace(/,/g,'.').matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map(m=>Number(m[1]));
+  const samePercents=(a,b)=>{
+    const x=percentValues(a),y=percentValues(b);
+    if(!x.length||!y.length||x.length!==y.length)return false;
+    return x.every((v,i)=>Math.abs(v-y[i])<0.0001);
+  };
   function assessAffected(cell,items,pool){
     const aliases=catAliases(cell.category||'');
     const textOf=(item)=>catNorm([item.category,item.name,...(Array.isArray(item.evidence)?item.evidence:[])].filter(Boolean).join(' '));
@@ -166,6 +172,11 @@
     });
     const current=numberFromValue(cell.current_value);
     const official=item?.rate_percent!=null?Number(item.rate_percent):null;
+    const officialValue=item?.current_value||item?.rate_text||'';
+    if(item&&officialValue&&cell.current_value&&percentValues(officialValue).length&&percentValues(cell.current_value).length){
+      if(samePercents(officialValue,cell.current_value))return {cls:'match',label:`✓ Офіційно підтверджено: ${officialValue}`};
+      return {cls:'conflict',label:`! Офіційне джерело показує ${officialValue}, у матриці зараз ${cell.current_value}`};
+    }
     if(item&&official!=null&&current!=null){
       if(Math.abs(official-current)<0.0001)return {cls:'match',label:`✓ Офіційно підтверджено: ${official}%`};
       return {cls:'conflict',label:`! Офіційне джерело показує ${official}%, у матриці зараз ${current}%`};
@@ -251,7 +262,8 @@
 
   function itemHtml(item){
     const date=(item.valid_from||item.valid_to)?`${fmtShort(item.valid_from)} → ${fmtShort(item.valid_to)}`:'';
-    return `<div class="sf-item"><b>${esc(item.name||item.category||item.partner||item.kind||'Позиція')}</b><span class="rate">${item.rate_percent!=null?esc(item.rate_percent)+'%':'—'}</span><span class="dates">${esc(date)}</span></div>`;
+    const shownRate=item.current_value||item.rate_text||(item.rate_percent!=null?String(item.rate_percent)+'%':'—');
+    return `<div class="sf-item"><b>${esc(item.name||item.category||item.partner||item.kind||'Позиція')}</b><span class="rate">${esc(shownRate)}</span><span class="dates">${esc(date)}</span></div>`;
   }
 
   function candidateHtml(c){
