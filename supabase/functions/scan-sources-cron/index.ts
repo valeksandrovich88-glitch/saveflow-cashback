@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 41;
+const PARSER_VERSION = 42;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -747,6 +747,51 @@ async function buildPartnerRosterAudit(service, structured, bank) {
   };
 }
 
+
+const UK_MONTHS = [
+  ["січ",1],["лют",2],["берез",3],["квіт",4],["трав",5],["черв",6],
+  ["лип",7],["серп",8],["верес",9],["жовт",10],["листопад",11],["груд",12]
+];
+
+function monthFromUkrainianWord(word) {
+  const x=String(word||"").toLocaleLowerCase("uk-UA");
+  const hit=UK_MONTHS.find(([stem])=>x.startsWith(stem));
+  return hit?hit[1]:null;
+}
+
+function detectMonthlySourceIssue(sourceId,text) {
+  if(!["rada-rewards","unex-card"].includes(String(sourceId||""))) return null;
+  const now=new Date();
+  const currentYear=now.getUTCFullYear();
+  const currentMonth=now.getUTCMonth()+1;
+  const s=String(text||"");
+  const mentions=[];
+  const patterns=[
+    /категорі[їя]\s+кешбек\p{L}*\s+(?:на|у)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu,
+    /кешбек[^\n]{0,60}?\s(?:у|на)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu,
+    /розрахову(?:й|йте)[^\n]{0,60}?\s(?:у|в)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu
+  ];
+  for(const re of patterns){
+    for(const m of s.matchAll(re)){
+      const month=monthFromUkrainianWord(m[1]);
+      if(!month) continue;
+      const year=m[2]?Number(m[2]):currentYear;
+      mentions.push({month,year,text:compactLabel(m[0]).slice(0,240)});
+    }
+  }
+  const unique=[...new Map(mentions.map(x=>[`${x.year}-${String(x.month).padStart(2,"0")}`,x])).values()];
+  if(!unique.length) return null;
+  const currentKey=`${currentYear}-${String(currentMonth).padStart(2,"0")}`;
+  const keys=unique.map(x=>`${x.year}-${String(x.month).padStart(2,"0")}`);
+  if(keys.includes(currentKey) && keys.some(x=>x!==currentKey)){
+    return {kind:"inconsistent",current_period:currentKey,detected_periods:keys,evidence:unique.map(x=>x.text),auto_publish:false};
+  }
+  if(!keys.includes(currentKey)){
+    return {kind:"stale",current_period:currentKey,detected_periods:keys,evidence:unique.map(x=>x.text),auto_publish:false};
+  }
+  return null;
+}
+
 function evidenceNorm(s) {
   return String(s || "").toLowerCase().replace(/[’'`]/g,"").replace(/[^a-zа-яіїєґ0-9]+/giu," ").trim();
 }
@@ -1240,6 +1285,8 @@ async function loadSource(source: any) {
         }
       }
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
+      const monthlySourceIssue=!structured.unsupported?detectMonthlySourceIssue(source.id,text):null;
+      if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
       const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":null))));
@@ -1274,6 +1321,19 @@ async function loadSource(source: any) {
           }
         }else{
           await service.from("scanner_candidates").update({status:"reviewed",review_note:"Автоматично закрито: офіційний roster партнерів знову збігається з partner index.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("status","pending");
+        }
+      }
+      if (!candidate && structured.monthly_source_review) {
+        const issue=structured.monthly_source_review;
+        const type=issue.kind==="inconsistent"?"official_monthly_source_inconsistent":"official_monthly_source_stale";
+        const issueHash=await sha256(JSON.stringify({type,current:issue.current_period,detected:issue.detected_periods,evidence:issue.evidence}));
+        const {data:existingMonthly}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type",type).eq("new_hash",issueHash).limit(1);
+        if(!existingMonthly?.length){
+          const {data:monthlyCandidate,error:monthlyError}=await service.from("scanner_candidates").insert({
+            run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:type,priority:"high",source_role:source.source_role,
+            old_hash:oldHash,new_hash:issueHash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"
+          }).select("id,candidate_type,priority").single();
+          if(!monthlyError&&monthlyCandidate){candidate=monthlyCandidate;candidates++;}
         }
       }
       if (isChanged && !candidate) {
