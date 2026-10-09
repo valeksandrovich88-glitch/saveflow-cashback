@@ -261,6 +261,8 @@
     const partnerAdded=Array.isArray(partnerAudit.added_partners)?partnerAudit.added_partners:[];
     const partnerMissing=Array.isArray(partnerAudit.missing_partners)?partnerAudit.missing_partners:[];
     const partnerChanged=Array.isArray(partnerAudit.changed_rates)?partnerAudit.changed_rates:[];
+    const partnerRosterComplete=partnerAudit.roster_complete!==false;
+    const partnerRosterNote=partnerAudit.roster_note||"";
     const categoryPool=Array.isArray(p.category_pool)?p.category_pool:[];
     const items=Array.isArray(p.items)?p.items:[];
     const shown=items.slice(0,8);
@@ -305,13 +307,14 @@
               <span>Офіційно: <b>${esc(partnerAudit.official_count??'—')}</b></span>
               <span>У SaveFlow: <b>${esc(partnerAudit.indexed_count??'—')}</b></span>
               <span>Збіглося: <b>${esc(partnerAudit.matched_count??'—')}</b></span>
+              <span>Покриття: <b>${partnerRosterComplete?'повне':'часткове'}</b></span>
             </div>
             <div class="sf-partner-audit-cols">
               <div class="sf-partner-audit-col added"><div class="sf-partner-audit-title">Нові партнери · +${partnerAdded.length}</div>${partnerAdded.length?partnerAdded.map(x=>`<div class="sf-partner-audit-row"><span>${esc(x)}</span><span>новий</span></div>`).join(''):'<div class="sf-evidence">Нових партнерів немає.</div>'}</div>
               <div class="sf-partner-audit-col missing"><div class="sf-partner-audit-title">Ймовірно вибули · −${partnerMissing.length}</div>${partnerMissing.length?partnerMissing.map(x=>`<div class="sf-partner-audit-row"><span>${esc(x.name||x)}</span><span>${esc(x.current_value||'—')}</span></div>`).join(''):'<div class="sf-evidence">Нічого не вибуло.</div>'}</div>
               <div class="sf-partner-audit-col changed"><div class="sf-partner-audit-title">Змінилась ставка · Δ${partnerChanged.length}</div>${partnerChanged.length?partnerChanged.map(x=>`<div class="sf-partner-audit-row"><span>${esc(x.name||x)}</span><span>${esc(x.old_value||'—')} → ${esc(x.new_value||'—')}</span></div>`).join(''):'<div class="sf-evidence">Змін ставок немає.</div>'}</div>
             </div>
-            <div class="sf-evidence">Сканер нічого не видаляє автоматично. Для нових партнерів без відкритої ставки картку не публікуємо, доки не підтвердимо %.</div>
+            <div class="sf-evidence">${partnerRosterComplete?'Сканер нічого не видаляє автоматично. Для нових партнерів без відкритої ставки картку не публікуємо, доки не підтвердимо %.':'Це частковий офіційний roster: сканер може додавати або звіряти підтверджених партнерів, але не трактує відсутніх як таких, що вибули.'}${partnerRosterNote?'<br>'+esc(partnerRosterNote):''}</div>
           </div>`:''}
           ${affectedShown.length?`<div class="sf-affected"><div class="sf-affected-title">Reference-комірки, які треба звірити з офіційним джерелом</div>${affectedAssessed.map(({cell:x,verdict})=>`<div class="sf-affected-row ${esc(verdict.cls)}"><b>${esc(x.category||x.cell_key||'Комірка')}</b><span class="sf-affected-value">${esc(x.current_value||'—')}</span><div class="sf-affected-verdict">${esc(verdict.label)}</div></div>`).join('')}${affected.length>affectedShown.length?`<div class="sf-affected-more">Ще ${affected.length-affectedShown.length} комірок не показано у короткому перегляді.</div>`:''}</div>`:''}
           ${categoryPool.length?`<div class="sf-category-pool"><div class="sf-category-pool-title">Офіційний пул категорій · ставки можуть змінюватися щомісяця</div>${categoryPool.map(x=>`<span class="sf-category-pill">${esc(x)}</span>`).join('')}</div>`:''}
