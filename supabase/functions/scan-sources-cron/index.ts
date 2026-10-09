@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 42;
+const PARSER_VERSION = 43;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1395,6 +1395,86 @@ async function loadSource(source: any) {
 
   const list=sources||[];
   for (let i=0;i<list.length;i+=6) await Promise.all(list.slice(i,i+6).map(scanOne));
+
+  // Coverage guard: reference-only matrix values must never look "verified"
+  // when SaveFlow has no enabled primary official source for that bank.
+  try {
+    const {data:referenceCells}=await service
+      .from("scanner_matrix_index")
+      .select("cell_key,bank,category,current_value,source_tier,source_url")
+      .eq("source_tier","reference");
+    const {data:primarySources}=await service
+      .from("scanner_sources")
+      .select("bank")
+      .eq("enabled",true)
+      .eq("source_role","primary")
+      .not("bank","is",null);
+
+    const primaryBanks=new Set((primarySources||[]).map((x:any)=>String(x.bank||"")).filter(Boolean));
+    const byBank=new Map<string,any[]>();
+    for(const cell of (referenceCells||[])){
+      const bank=String(cell.bank||"").trim();
+      if(!bank) continue;
+      if(!byBank.has(bank)) byBank.set(bank,[]);
+      byBank.get(bank)!.push(cell);
+    }
+
+    for(const [bank,cells] of byBank.entries()){
+      if(primaryBanks.has(bank)){
+        await service.from("scanner_candidates").update({
+          status:"reviewed",
+          review_note:"Автоматично закрито: для банку вже підключене первинне офіційне джерело.",
+          reviewed_at:new Date().toISOString(),
+          updated_at:new Date().toISOString()
+        }).eq("bank",bank).eq("candidate_type","reference_without_official_source").eq("status","pending");
+        continue;
+      }
+      const sorted=[...cells].sort((a,b)=>String(a.cell_key).localeCompare(String(b.cell_key),"uk"));
+      const gapHash=await sha256(JSON.stringify({bank,cells:sorted.map(x=>[x.cell_key,x.current_value])}));
+      const {data:existingGap}=await service.from("scanner_candidates")
+        .select("id")
+        .eq("bank",bank)
+        .eq("candidate_type","reference_without_official_source")
+        .eq("new_hash",gapHash)
+        .limit(1);
+      if(existingGap?.length) continue;
+      const payload={
+        bank,
+        coverage_gap:{
+          reason:"no_enabled_primary_official_source",
+          affected_count:sorted.length,
+          detected_on:new Date().toISOString().slice(0,10),
+          auto_publish:false
+        },
+        review_policy:{
+          auto_publish:false,
+          official_primary:false,
+          reference_only:true,
+          manual_only:true,
+          requires_human_review:true
+        },
+        items:[]
+      };
+      const {data:gapCandidate,error:gapError}=await service.from("scanner_candidates").insert({
+        run_id:run.id,
+        source_id:null,
+        bank,
+        candidate_type:"reference_without_official_source",
+        priority:"high",
+        source_role:"reference",
+        old_hash:null,
+        new_hash:gapHash,
+        affected_cells:sorted,
+        excerpt:"У матриці є значення з довідкових джерел, але для цього банку в сканері не підключено первинне офіційне джерело.",
+        parser_version:PARSER_VERSION,
+        structured_payload:payload,
+        status:"pending"
+      }).select("id,candidate_type,priority").single();
+      if(!gapError&&gapCandidate) candidates++;
+    }
+  } catch(e) {
+    results.push({coverage_guard_error:e instanceof Error?e.message:String(e)});
+  }
   const finalStatus=failed===list.length&&list.length>0?"failed":(failed?"partial":"completed");
   await service.from("scanner_runs").update({finished_at:new Date().toISOString(),status:finalStatus,changed_sources:changed,failed_sources:failed,candidates_created:candidates,summary:{fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results}}).eq("id",run.id);
   return json({run_id:run.id,status:finalStatus,total_sources:list.length,changed_sources:changed,failed_sources:failed,candidates_created:candidates,fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results});
