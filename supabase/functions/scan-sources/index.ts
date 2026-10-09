@@ -1108,7 +1108,6 @@ async function loadSource(source: any) {
             .eq("source_id", source.id)
             .eq("candidate_type", "partner_roster_changed")
             .eq("new_hash", auditHash)
-            .eq("status", "pending")
             .limit(1);
           if (!existingRoster?.length) {
             const { data: rosterCandidate, error: rosterError } = await service.from("scanner_candidates").insert({
