@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 43;
+const PARSER_VERSION = 44;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -661,6 +661,109 @@ function normalizeGlobusPartnerStructured(text,structured){
   };
 }
 
+
+function fmtPct(value) {
+  if(value==null || !Number.isFinite(Number(value))) return null;
+  return String(Number(value)).replace(".",",")+"%";
+}
+
+function bisbankCategoryName(name) {
+  const x=compactLabel(name);
+  if(/^АЗС\s+та\s+електрозарядки$/iu.test(x)) return "АЗС";
+  return x;
+}
+
+function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
+  const raw=String(rawHtml||"");
+  const items=[];
+  const seen=new Set();
+  for(const m of raw.matchAll(/<div\s+class=["']h4["']>\s*([\s\S]*?)\s*<\/div>[\s\S]*?<div\s+class=["']description["']>\s*([\s\S]*?)\s*<\/div>/giu)){
+    const heading=bisbankCategoryName(cleanText(m[1]));
+    if(!heading || /рефераль|актуальні|пропозиці/iu.test(heading)) continue;
+    const desc=cleanText(m[2]);
+    const creditMatch=desc.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*кредитн\p{L}*\s+кошт/iu);
+    const ownMatch=desc.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*власн\p{L}*\s+кошт/iu);
+    const credit=creditMatch?parseRateNumber(creditMatch[1]):null;
+    const own=ownMatch?parseRateNumber(ownMatch[1]):null;
+    if(credit===null && own===null) continue;
+    const key=evidenceNorm(heading);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const equal=credit!==null&&own!==null&&Math.abs(credit-own)<0.0001;
+    const currentValue=equal?fmtPct(credit):(own!==null&&credit!==null?`${fmtPct(own)} / ${fmtPct(credit)}`:(fmtPct(own??credit)||null));
+    const rate=[credit,own].filter((x)=>x!==null).reduce((a,b)=>Math.max(a,b),0);
+    items.push({
+      kind:"category",
+      name:heading,
+      category:heading,
+      partner:null,
+      rate_percent:rate,
+      rate_text:currentValue,
+      current_value:currentValue,
+      own_rate_percent:own,
+      credit_rate_percent:credit,
+      valid_from:null,
+      valid_to:null,
+      evidence:[`${heading}: ${desc}`.slice(0,700)],
+      conditions:[desc.slice(0,700)]
+    });
+  }
+  const limitMatch=String(text||"").match(/Максимальн\p{L}*\s+сума\s+кешбек\p{L}*\s+за\s+місяц\p{L}*\s*[—-]\s*(\d[\d\s]*)\s*грн/iu)
+    || String(text||"").match(/Максимальн\p{L}*\s+сума\s+кешбек\p{L}*[^\d]{0,50}(\d[\d\s]*)\s*грн/iu);
+  const maxCashback=limitMatch?Number(limitMatch[1].replace(/\s+/g,"")):500;
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:uniqNumbers(items.flatMap((x)=>[x.own_rate_percent,x.credit_rate_percent]).filter((x)=>x!==null)),
+    limits:{...(structured?.limits||{}),max_cashback_uah:Number.isFinite(maxCashback)?maxCashback:500},
+    selection:{...(structured?.selection||{}),cadence:"monthly",max_categories:3},
+    confidence:items.length>=5?"review_ready":"signal_only",
+    official_value_mode:"own_credit_pair",
+    current_offer_count:items.length
+  };
+}
+
+function normalizeCrystalbankCashbackStructured(rawHtml,text,structured) {
+  const raw=String(rawHtml||"");
+  const block=raw.match(/MY\s+CRYSTALBANK\s+Cash[^<]{0,40}[\s\S]{0,900}?Власні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%[\s\S]{0,240}?Кредитні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const own=block?parseRateNumber(block[1]):null;
+  const credit=block?parseRateNumber(block[2]):null;
+  if(own===null&&credit===null) return structured;
+  const currentValue=own!==null&&credit!==null?`${fmtPct(own)} / ${fmtPct(credit)}`:(fmtPct(own??credit)||null);
+  const rate=[own,credit].filter((x)=>x!==null).reduce((a,b)=>Math.max(a,b),0);
+  const minMatch=String(text||"").match(/сума\s+кожн\p{L}*[^\d]{0,30}(\d[\d\s]*)\s*UAH/iu);
+  const maxMatch=String(text||"").match(/Максимальн\p{L}*\s+розмір\s+нарахуван\p{L}*[^\d]{0,50}(\d[\d\s]*)\s*UAH/iu);
+  const item={
+    kind:"base",
+    name:"Усі покупки",
+    category:"Усі покупки",
+    partner:null,
+    rate_percent:rate,
+    rate_text:currentValue,
+    current_value:currentValue,
+    own_rate_percent:own,
+    credit_rate_percent:credit,
+    valid_from:null,
+    valid_to:null,
+    evidence:[`MY CRYSTALBANK Cash’U: власні ${fmtPct(own)||"—"}, кредитні ${fmtPct(credit)||"—"}`],
+    conditions:["Безготівкові покупки в торгово-сервісній мережі України"]
+  };
+  return {
+    ...structured,
+    items:[item],
+    item_count:1,
+    rates_percent:uniqNumbers([own,credit].filter((x)=>x!==null)),
+    limits:{
+      ...(structured?.limits||{}),
+      min_purchase_uah:minMatch?Number(minMatch[1].replace(/\s+/g,"")):200,
+      max_cashback_uah:maxMatch?Number(maxMatch[1].replace(/\s+/g,"")):500
+    },
+    confidence:"review_ready",
+    official_value_mode:"own_credit_pair"
+  };
+}
+
 function partnerRosterKey(s) {
   return String(s || "")
     .toLocaleLowerCase("uk-UA")
@@ -1266,6 +1369,8 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
+        if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
         hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
