@@ -913,7 +913,7 @@ async function loadSource(source: any) {
       if(partnerRosterAudit){
         const auditHash=await sha256(JSON.stringify({added:partnerRosterAudit.added_partners,missing:partnerRosterAudit.missing_partners.map((x:any)=>x.name)}));
         if(partnerRosterAudit.changed){
-          const {data:existingRoster}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("new_hash",auditHash).eq("status","pending").limit(1);
+          const {data:existingRoster}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("new_hash",auditHash).limit(1);
           if(!existingRoster?.length){
             const {data:rosterCandidate,error:rosterError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||"ПУМБ",candidate_type:"partner_roster_changed",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:auditHash,affected_cells:[],excerpt:`Офіційний roster ПУМБ: +${partnerRosterAudit.added_partners.length} / -${partnerRosterAudit.missing_partners.length}`,parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"}).select("id,candidate_type,priority").single();
             if(!rosterError&&rosterCandidate){candidate=rosterCandidate;candidates++;}
