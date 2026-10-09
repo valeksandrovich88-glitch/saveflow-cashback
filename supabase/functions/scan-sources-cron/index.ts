@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 39;
+const PARSER_VERSION = 40;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -536,6 +536,81 @@ function normalizeVstPartnerStructured(text, structured) {
     rates_percent:uniqNumbers(roster.map((x)=>x.rate_percent).filter((x)=>x!==null)),
     partner_roster_count:roster.length,partner_roster_source:"official_vst_partner_page",
     confidence:roster.length>=5?"review_ready":"signal_only"};
+}
+
+
+function creditDniproPartnerNameFromUrl(rawUrl) {
+  try {
+    const host = new URL(rawUrl, "https://creditdnepr.com.ua").hostname.toLocaleLowerCase("uk-UA").replace(/^www\./,"");
+    if (/^(?:express\.)?auchan\.ua$/u.test(host)) return "Ашан";
+    if (/^(?:uk\.)?polis\.ua$/u.test(host)) return "Polis.ua";
+    if (/^(?:filiya\.)?mci\.ua$/u.test(host) || /^doc\.mci\.ua$/u.test(host)) return "МЦ Інго";
+    if (/^hotline\.finance$/u.test(host)) return "hotline.finance";
+    if (!host || host === "creditdnepr.com.ua" || host.endsWith(".creditdnepr.com.ua")) return null;
+    return host;
+  } catch { return null; }
+}
+
+function creditDniproPartnerCategory(name) {
+  const x=String(name||"").toLocaleLowerCase("uk-UA");
+  if (/auchan|ашан/iu.test(x)) return "Продукти";
+  if (/polis|hotline\.finance/iu.test(x)) return "Страхування";
+  if (/інго|mci/iu.test(x)) return "Медицина";
+  return null;
+}
+
+function extractCreditDniproPartnerRoster(rawHtml) {
+  const raw=String(rawHtml||"");
+  const marker=/Пропозиці(?:ї|&[a-z]+;)\s+від\s+партнерів/iu.exec(raw);
+  if(!marker) return [];
+  const start=marker.index;
+  let end=raw.search(/Завантажуйте\s+або\s+оновлюйте\s+мобільний\s+застосунок/iu);
+  if(end<0 || end<=start) end=Math.min(raw.length,start+40000);
+  const segment=raw.slice(start,end);
+  const items=[],seen=new Set();
+  for(const m of segment.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)){
+    const url=String(m[1]||"").trim();
+    const label=cleanText(String(m[2]||""));
+    const rateMatch=label.match(/(\d{1,3}(?:[.,]\d+)?)\s*%/u);
+    if(!rateMatch) continue;
+    const rate=parseRateNumber(rateMatch[1]);
+    const name=creditDniproPartnerNameFromUrl(url);
+    if(!name || rate===null) continue;
+    const key=partnerRosterKey(name);
+    if(!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      kind:"partner",
+      name,
+      partner:name,
+      category:creditDniproPartnerCategory(name),
+      rate_percent:rate,
+      rate_text:String(rate).replace(".",",")+"%",
+      current_value:String(rate).replace(".",",")+"%",
+      valid_from:null,
+      valid_to:null,
+      evidence:[label.slice(0,500)],
+      conditions:[label.slice(0,500)],
+      source_url:new URL(url,"https://creditdnepr.com.ua").toString()
+    });
+  }
+  return items;
+}
+
+function mergeCreditDniproPartnerRoster(structured, rawHtml) {
+  const roster=extractCreditDniproPartnerRoster(rawHtml);
+  if(!roster.length) return structured;
+  const existing=Array.isArray(structured?.items)?structured.items:[];
+  const nonPartner=existing.filter((x)=>x?.kind!=="partner");
+  const merged=[...nonPartner,...roster];
+  return {
+    ...structured,
+    items:merged,
+    item_count:merged.length,
+    partner_roster_count:roster.length,
+    partner_roster_source:"official_cashback_partner_section",
+    confidence:roster.length>=2?"review_ready":(structured?.confidence||"signal_only")
+  };
 }
 
 function partnerRosterKey(s) {
@@ -1090,7 +1165,7 @@ async function loadSource(source: any) {
         pageTitle=previous?.title||pageTitle; safeFocused=safeDbText(previous?.text_excerpt||""); hash=binaryHash;
       }else{
         text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
-        if(source.id==="creditdnepr-cashback") structured=normalizeCreditDniproStructured(text,structured);
+        if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
@@ -1115,7 +1190,7 @@ async function loadSource(source: any) {
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":null));
+      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":null)));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
