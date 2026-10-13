@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 53;
+const PARSER_VERSION = 54;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -990,6 +990,44 @@ function normalizeIdeaCashbackStructured(rawHtml,text,structured) {
   };
 }
 
+function normalizeTascomVerycardStructured(text,structured) {
+  const raw=String(text||"");
+  const matches=[...raw.matchAll(/Кешбек\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%\s+на\s+аптеки,\s*комунальні\s+послуги,\s*АЗС\s+та\s+продукти/giu)];
+  const rates=matches.map((m)=>parseRateNumber(m[1])).filter((x)=>x!==null);
+  if(rates.length<2) return structured;
+  const own=Math.min(...rates);
+  const credit=Math.max(...rates);
+  const shown=`до ${fmtPct(own)} / до ${fmtPct(credit)}`;
+  const categories=["Аптеки / здоров'я","Комунальні послуги","АЗС","Продукти"];
+  const items=categories.map((category)=>({
+    kind:"category",
+    name:category,
+    category,
+    partner:null,
+    rate_percent:credit,
+    rate_text:shown,
+    current_value:shown,
+    own_rate_percent:own,
+    credit_rate_percent:credit,
+    valid_from:null,
+    valid_to:null,
+    evidence:[`VERY CARD: власні кошти — до ${fmtPct(own)}, кредитні кошти — до ${fmtPct(credit)}; категорії: аптеки, комунальні послуги, АЗС та продукти.`],
+    conditions:["VERY CARD може використовуватися для власних та кредитних коштів."]
+  }));
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:uniqNumbers([own,credit]),
+    category_pool:categories,
+    category_pool_source:"official_verycard_landing_sourcemap",
+    official_value_mode:"own_credit_caps",
+    own_funds_rate_cap_percent:own,
+    credit_funds_rate_cap_percent:credit,
+    confidence:"review_ready"
+  };
+}
+
 function normalizeCrystalbankCashbackStructured(rawHtml,text,structured) {
   const raw=String(rawHtml||"");
   const block=raw.match(/MY\s+CRYSTALBANK\s+Cash[^<]{0,40}[\s\S]{0,900}?Власні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%[\s\S]{0,240}?Кредитні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
@@ -1651,6 +1689,53 @@ async function loadSenseMonthlyPartnersSource() {
   };
 }
 
+async function loadTascomVerycardSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"text/html,application/xhtml+xml,application/javascript,application/json;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const landing=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(20000)});
+  if(!landing.ok) throw new Error("VERY CARD landing HTTP "+landing.status);
+  const html=await landing.text();
+  const mainSrc=html.match(/<script[^>]+src=["']([^"']*\/static\/js\/main\.[a-f0-9]+\.js)["']/iu)?.[1];
+  if(!mainSrc) throw new Error("VERY CARD main bundle not found");
+  const mainUrl=new URL(mainSrc,sourceUrl).toString();
+  const mainRes=await fetch(mainUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(20000)});
+  if(!mainRes.ok) throw new Error("VERY CARD main bundle HTTP "+mainRes.status);
+  const mainJs=await mainRes.text();
+  const chunkHash=mainJs.match(/64\s*:\s*["']([a-f0-9]+)["']/iu)?.[1];
+  if(!chunkHash) throw new Error("VERY CARD app chunk hash not found");
+  const mapUrl=new URL(`/static/js/64.${chunkHash}.chunk.js.map`,sourceUrl).toString();
+  const mapRes=await fetch(mapUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(20000)});
+  if(!mapRes.ok) throw new Error("VERY CARD source map HTTP "+mapRes.status);
+  const mapText=await mapRes.text();
+  let map:any;
+  try{ map=JSON.parse(mapText); }catch(_){ throw new Error("VERY CARD source map JSON invalid"); }
+  const sources=Array.isArray(map?.sources)?map.sources:[];
+  const contents=Array.isArray(map?.sourcesContent)?map.sourcesContent:[];
+  const wanted:any[]=[];
+  for(let i=0;i<sources.length;i++){
+    const p=String(sources[i]||"");
+    if(/sections\/(?:Main|Use)\/index\.js$/u.test(p) && typeof contents[i]==="string") wanted.push(contents[i]);
+  }
+  const raw=wanted.join("\n\n");
+  if(wanted.length<2 || !/Кешбек\s+до\s+3\s*%/iu.test(raw) || !/Кешбек\s+до\s+0[.,]5\s*%/iu.test(raw)){
+    throw new Error("VERY CARD cashback source sections not found");
+  }
+  return {
+    status:landing.status,
+    raw,
+    responseBytes:new TextEncoder().encode(mapText).byteLength,
+    documentType:"spa_sourcemap",
+    contentType:String(mapRes.headers.get("content-type")||"application/json"),
+    transport:"tascom_sourcemap",
+    resolvedUrl:sourceUrl
+  };
+}
+
 async function loadIzibankCashbackRulesPdfSource(sourceUrl:string) {
   const headers={
     "User-Agent":BROWSER_UA,
@@ -1783,6 +1868,9 @@ async function loadSource(source: any) {
     if (source.id === "izibank-cashback-rules") {
       return await loadIzibankCashbackRulesPdfSource(source.url);
     }
+    if (source.id === "tascom-verycard") {
+      return await loadTascomVerycardSource(source.url);
+    }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
     try {
@@ -1822,6 +1910,7 @@ async function loadSource(source: any) {
         if(source.id==="abank-cashback") structured=normalizeAbankCashbackLandingStructured(raw,text,structured);
         if(source.id==="abank-cashback-rules") structured=normalizeAbankCashbackRulesStructured(text,structured);
         if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
+        if(source.id==="tascom-verycard") structured=normalizeTascomVerycardStructured(text,structured);
         if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
