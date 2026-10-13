@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 56;
+const PARSER_VERSION = 57;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -701,6 +701,39 @@ function parseIzibankPublicPartnerRefs(rawHtml) {
     if(ref&&!seen.has(ref)){seen.add(ref);out.push(ref);}
   }
   return out;
+}
+
+function normalizeMonobankRulesStructured(text,structured) {
+  const raw=String(text||"");
+  const maxRate=raw.match(/Кешбек\s*-?[\s\S]{0,180}?до\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const maxCash=raw.match(/Максимальн\p{L}*\s+сума\s+кешбек\p{L}*[\s\S]{0,80}?(\d[\d\s]*)\s*грн\s+на\s+місяц/iu);
+  const select=raw.match(/може\s+обрати\s+(\S+)\s+категор\p{L}*\s+по\s+MCC/iu);
+  const selectCount=select&&/дві|2/iu.test(select[1])?2:null;
+  const unlimitedMerchant=/необмежен\p{L}*\s+кількість\s+по\s+merchant\s+коду/iu.test(raw);
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    selection:{
+      cadence:"monthly",
+      max_categories:selectCount||2,
+      partner_categories:unlimitedMerchant?"unlimited_merchant_categories":null
+    },
+    limits:{
+      ...(structured?.limits||{}),
+      max_cashback_uah:maxCash?Number(String(maxCash[1]).replace(/\s+/g,"")):500,
+      partner_cashback_general_limit:false
+    },
+    max_bank_rate_cap_percent:maxRate?parseRateNumber(maxRate[1]):20,
+    exact_current_category_rates_public:false,
+    exact_current_category_list_public:false,
+    current_rates_location:"monobank app",
+    category_definition_mode:"MCC",
+    partner_definition_mode:"merchant",
+    current_category_rates_change_monthly:true,
+    confidence:"rules_only"
+  };
 }
 
 function normalizeRaifCashbackStructured(text,structured) {
@@ -1710,6 +1743,36 @@ async function loadSenseMonthlyPartnersSource() {
   };
 }
 
+async function loadMonobankRulesPdfSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://monobank.ua/",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(30000)});
+  if(!res.ok) throw new Error("monobank rules PDF HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const binaryHash=await sha256Bytes(bytes);
+  const parsed=await pdf(Buffer.from(bytes));
+  const raw=String(parsed.text||"").replace(/\r/g,"\n");
+  if(raw.length<10000 || !/Стаття\s+2\.\s*Кешбек/iu.test(raw) || !/Максимальн\p{L}*\s+сума\s+кешбек/iu.test(raw)){
+    throw new Error("monobank cashback rules PDF text extraction failed");
+  }
+  return {
+    status:res.status,
+    raw,
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:String(res.headers.get("content-type")||"application/pdf"),
+    binaryHash,
+    transport:"monobank_pdf_text",
+    resolvedUrl:sourceUrl
+  };
+}
+
 async function loadTascomVerycardSource(sourceUrl:string) {
   const headers={
     "User-Agent":BROWSER_UA,
@@ -1892,6 +1955,9 @@ async function loadSource(source: any) {
     if (source.id === "tascom-verycard") {
       return await loadTascomVerycardSource(source.url);
     }
+    if (source.id === "monobank-cashback-rules") {
+      return await loadMonobankRulesPdfSource(source.url);
+    }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
     try {
@@ -1924,6 +1990,7 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="monobank-cashback-rules") structured=normalizeMonobankRulesStructured(text,structured);
         if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
         if(source.id==="izibank-market") structured=normalizeIzibankMarketStructured(raw,text,structured);
@@ -1938,7 +2005,7 @@ async function loadSource(source: any) {
         hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
-      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules","raif-cashback"].includes(source.id)){
+      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules","raif-cashback","monobank-cashback-rules"].includes(source.id)){
         const limits={...(structured.limits||{})};
         const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
         structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
