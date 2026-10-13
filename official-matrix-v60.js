@@ -10,7 +10,8 @@
     'VST bank':new Set(["Аптеки / здоров'я",'Кафе та ресторани','Кіно та театри','Краса','Одяг та взуття','Таксі']),
     'Банк Кредит Дніпро':new Set(['АЗС',"Аптеки / здоров'я",'Дитячі товари','Дім та ремонт','Кафе та ресторани','Книги та канцтовари','Краса','Одяг та взуття','Розваги','Спорт та фітнес','Транспорт']),
     'GlobusPlus':new Set(["Аптеки / здоров'я",'Ігри та додатки','Кафе та ресторани','Краса','Продукти','Спорт та фітнес','Транспорт']),
-    'monobank':new Set(['Кафе та ресторани','Квіти','Кіно та театри','Маркетплейси','Продукти','Розваги','Таксі'])
+    'monobank':new Set(['Кафе та ресторани','Квіти','Кіно та театри','Маркетплейси','Продукти','Розваги','Таксі']),
+    'Unex Bank':new Set(["Аптеки / здоров'я",'Одяг та взуття'])
   };
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
 
@@ -22,7 +23,7 @@
     .cash.sf-official-dynamic::after{content:'динамічно';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.02em;color:#718077;text-transform:uppercase}
     .cash.sf-official-unverified{background:rgba(245,247,245,.72)!important;color:#8a938d!important}
     .cash.sf-official-unverified .cash-value{font-size:12px!important;font-weight:800!important;line-height:1.15!important}
-    .cash.sf-official-unverified::after{content:'немає офіц. даних';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.01em;color:#929a95;text-transform:uppercase}
+    .cash.sf-official-unverified::after{content:'не підтверджено';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.01em;color:#929a95;text-transform:uppercase}
   `;
   document.head.appendChild(st);
 
