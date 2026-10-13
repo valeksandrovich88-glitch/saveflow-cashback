@@ -1,5 +1,5 @@
 (()=>{
-  const OFFERS=[{"name":"Ашан","category":"Продукти","rate":5,"rateText":"5%","note":"На всі товари · партнерська пропозиція Банку Кредит Дніпро"},{"name":"Polis.ua","category":"Страхування","rate":10,"rateText":"10%","note":"На будь-які страховки"},{"name":"МЦ Інго","category":"Медицина","rate":10,"rateText":"10%","note":"За онлайн та офлайн покупки"},{"name":"hotline.finance","category":"Страхування","rate":10,"rateText":"10%","note":"За онлайн покупки"}];
+  const OFFERS=[{"name":"Ашан","category":"Продукти","rate":5,"rateText":"5%","note":"На всі товари · партнерська пропозиція Банку Кредит Дніпро"},{"name":"Polis.ua","category":"Страхування","rate":10,"rateText":"10%","note":"На будь-які страховки"},{"name":"12.org.ua","category":"Розваги","rate":10,"rateText":"10%","note":"За офлайн покупки квитків"},{"name":"МЦ Інго","category":"Медицина","rate":10,"rateText":"10%","note":"За онлайн та офлайн покупки"},{"name":"hotline.finance","category":"Страхування","rate":10,"rateText":"10%","note":"За онлайн покупки"}];
   const BANK='Банк Кредит Дніпро';
   const SOURCE='https://creditdnepr.com.ua/pryvatnym-osobam/platizni-kartki/cashback';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
