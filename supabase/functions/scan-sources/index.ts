@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 59;
+const PARSER_VERSION = 60;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1227,12 +1227,13 @@ function monthFromUkrainianWord(word) {
   return hit?hit[1]:null;
 }
 
-function detectMonthlySourceIssue(sourceId,text) {
+function detectMonthlySourceIssue(sourceId,text,rawHtml="") {
   if(!["rada-rewards","unex-card"].includes(String(sourceId||""))) return null;
   const now=new Date();
   const currentYear=now.getUTCFullYear();
   const currentMonth=now.getUTCMonth()+1;
   const s=String(text||"");
+  const raw=String(rawHtml||"");
   const mentions=[];
   const patterns=[
     /категорі[їя]\s+кешбек\p{L}*\s+(?:на|у)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu,
@@ -1251,7 +1252,30 @@ function detectMonthlySourceIssue(sourceId,text) {
   if(!unique.length) return null;
   const currentKey=`${currentYear}-${String(currentMonth).padStart(2,"0")}`;
   const keys=unique.map(x=>`${x.year}-${String(x.month).padStart(2,"0")}`);
+
   if(keys.includes(currentKey) && keys.some(x=>x!==currentKey)){
+    // Unex occasionally leaves a stale month word in the body while updating
+    // the current-month heading, creative asset and cashback values. When all
+    // stronger current-period markers agree, keep the rates usable but surface
+    // the stale sentence as a normal editorial-review item.
+    if(String(sourceId)==="unex-card"){
+      const enMonths=["january","february","march","april","may","june","july","august","september","october","november","december"];
+      const enMonth=enMonths[currentMonth-1];
+      const currentAsset=new RegExp(`card[-_ ]cashback[^"'<>]{0,120}${enMonth}[^"'<>]{0,60}${currentYear}`,"iu").test(raw);
+      const currentHeading=mentions.some(x=>x.month===currentMonth&&x.year===currentYear&&/кешбек/iu.test(x.text));
+      if(currentAsset&&currentHeading){
+        return {
+          kind:"editorial_mismatch",
+          current_period:currentKey,
+          detected_periods:keys,
+          evidence:unique.map(x=>x.text),
+          current_context_confirmed:true,
+          confirmation_evidence:[`current-month heading: ${currentKey}`,`current-month cashback asset: ${enMonth} ${currentYear}`],
+          note:"Current-month heading and creative asset agree; an older month remains in one body sentence.",
+          auto_publish:false
+        };
+      }
+    }
     return {kind:"inconsistent",current_period:currentKey,detected_periods:keys,evidence:unique.map(x=>x.text),auto_publish:false};
   }
   if(!keys.includes(currentKey)){
@@ -2065,7 +2089,7 @@ async function loadSource(source: any) {
         }
       }
       structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
-      const monthlySourceIssue=!structured.unsupported?detectMonthlySourceIssue(source.id,text):null;
+      const monthlySourceIssue=!structured.unsupported?detectMonthlySourceIssue(source.id,text,raw):null;
       if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
@@ -2103,18 +2127,38 @@ async function loadSource(source: any) {
           await service.from("scanner_candidates").update({status:"reviewed",review_note:"Автоматично закрито: офіційний roster партнерів знову збігається з partner index.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("status","pending");
         }
       }
+      const monthlyCandidateTypes=["official_monthly_source_inconsistent","official_monthly_source_stale","official_monthly_source_editorial_mismatch"];
       if (!candidate && structured.monthly_source_review) {
         const issue=structured.monthly_source_review;
-        const type=issue.kind==="inconsistent"?"official_monthly_source_inconsistent":"official_monthly_source_stale";
-        const issueHash=await sha256(JSON.stringify({type,current:issue.current_period,detected:issue.detected_periods,evidence:issue.evidence}));
+        const type=issue.kind==="inconsistent"
+          ?"official_monthly_source_inconsistent"
+          :(issue.kind==="editorial_mismatch"?"official_monthly_source_editorial_mismatch":"official_monthly_source_stale");
+        const priority=issue.kind==="editorial_mismatch"?"normal":"high";
+        const obsoleteMonthlyTypes=monthlyCandidateTypes.filter(x=>x!==type);
+        if(obsoleteMonthlyTypes.length){
+          await service.from("scanner_candidates").update({
+            status:"reviewed",
+            review_note:"Автоматично перекласифіковано після повторної перевірки місячного джерела.",
+            reviewed_at:new Date().toISOString(),
+            updated_at:new Date().toISOString()
+          }).eq("source_id",source.id).eq("status","pending").in("candidate_type",obsoleteMonthlyTypes);
+        }
+        const issueHash=await sha256(JSON.stringify({type,current:issue.current_period,detected:issue.detected_periods,evidence:issue.evidence,confirmed:issue.current_context_confirmed||false}));
         const {data:existingMonthly}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type",type).eq("new_hash",issueHash).limit(1);
         if(!existingMonthly?.length){
           const {data:monthlyCandidate,error:monthlyError}=await service.from("scanner_candidates").insert({
-            run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:type,priority:"high",source_role:source.source_role,
+            run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:type,priority,source_role:source.source_role,
             old_hash:oldHash,new_hash:issueHash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"
           }).select("id,candidate_type,priority").single();
           if(!monthlyError&&monthlyCandidate){candidate=monthlyCandidate;candidates++;}
         }
+      } else if (!structured.monthly_source_review) {
+        await service.from("scanner_candidates").update({
+          status:"reviewed",
+          review_note:"Автоматично закрито: місячне офіційне джерело більше не містить конфлікту періодів.",
+          reviewed_at:new Date().toISOString(),
+          updated_at:new Date().toISOString()
+        }).eq("source_id",source.id).eq("status","pending").in("candidate_type",monthlyCandidateTypes);
       }
       if (isChanged && !candidate) {
         changed++;
