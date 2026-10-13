@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 51;
+const PARSER_VERSION = 52;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -681,6 +681,90 @@ function bisbankCategoryName(name) {
   const x=compactLabel(name);
   if(/^АЗС\s+та\s+електрозарядки$/iu.test(x)) return "АЗС";
   return x;
+}
+
+function parseIzibankPublicPartnerRefs(rawHtml) {
+  const raw=String(rawHtml||"");
+  const marker='data-anchor="partners-1"';
+  const start=raw.indexOf(marker);
+  if(start<0) return [];
+  const seg=raw.slice(start,start+65000);
+  const out=[]; const seen=new Set();
+  for(const m of seg.matchAll(/&quot;resourceRef&quot;:&quot;([^&]+)&quot;/giu)){
+    const ref=String(m[1]||"").trim();
+    if(ref&&!seen.has(ref)){seen.add(ref);out.push(ref);}
+  }
+  return out;
+}
+
+function normalizeIzibankCashbackStructured(text,structured) {
+  const raw=String(text||"");
+  const selected=raw.match(/обирай\s+до\s+(\d+)\s+категор/iu);
+  const bankLimit=raw.match(/накопичуй\s+кешбек\s+до\s+(\d[\d\s]*)\s*грн\s+щомісяц/iu);
+  const minWithdrawal=[...raw.matchAll(/вивод\p{L}*[^\d]{0,40}від\s+(\d[\d\s]*)\s*грн/giu)]
+    .map((m)=>Number(String(m[1]).replace(/\s+/g,""))).filter(Number.isFinite);
+  const partnerCap=raw.match(/кешбек\s+від\s+партнер\p{L}*\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const marketCap=raw.match(/кешбек[-\s]?маркет\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    selection:{cadence:"monthly",max_categories:selected?Number(selected[1]):3},
+    limits:{
+      max_bank_cashback_uah:bankLimit?Number(String(bankLimit[1]).replace(/\s+/g,"")):600,
+      min_withdrawal_uah:minWithdrawal.length?Math.min(...minWithdrawal):100
+    },
+    max_partner_rate_percent:partnerCap?parseRateNumber(partnerCap[1]):null,
+    market_rate_cap_percent:marketCap?parseRateNumber(marketCap[1]):null,
+    partner_cashback_activation:"automatic",
+    exact_current_rates_public:false,
+    exact_partner_rates_public:false,
+    current_offers_location:"izibank app",
+    confidence:"rules_only"
+  };
+}
+
+function normalizeIzibankMarketStructured(rawHtml,text,structured) {
+  const raw=String(text||"");
+  const refs=parseIzibankPublicPartnerRefs(rawHtml);
+  const cap=raw.match(/отримуй\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%\s*кешбек/iu)
+    || raw.match(/кешбек[-\s]?маркет\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const noLimit=/без\s+обмежень\s+на\s+максимальну\s+суму\s+кешбек/iu.test(raw);
+  const monthly600=raw.match(/накопичуй\s+до\s+(\d[\d\s]*)\s*грн\s+кешбек\p{L}*\s+щомісяц/iu);
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    limits:{},
+    market_rate_cap_percent:cap?parseRateNumber(cap[1]):null,
+    exact_partner_rates_public:false,
+    current_partner_rates_location:"izibank app / merchant page after selecting an offer",
+    public_partner_logo_count:refs.length,
+    public_partner_resource_refs:refs,
+    partner_roster_complete:false,
+    partner_roster_note:"Public page exposes a rotating logo strip and sends users to the app for merchant names, rates and conditions; absence from the public strip must not be treated as removal.",
+    market_limit_claim_conflict:Boolean(noLimit&&monthly600),
+    market_limit_claims:{
+      no_maximum_claim:noLimit,
+      monthly_amount_uah:monthly600?Number(String(monthly600[1]).replace(/\s+/g,"")):null
+    },
+    confidence:"signal_only"
+  };
+}
+
+function normalizeIzibankRulesStructured(text,structured) {
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    exact_current_rates_public:false,
+    current_rates_location:"izibank app",
+    pdf_text_extracted:true,
+    confidence:"rules_only"
+  };
 }
 
 function normalizeAbankCashbackLandingStructured(rawHtml,text,structured) {
@@ -1516,6 +1600,34 @@ async function loadSenseMonthlyPartnersSource() {
   };
 }
 
+async function loadIzibankCashbackRulesPdfSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://promo.izibank.com.ua/izicashback",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(20000)});
+  if(!res.ok) throw new Error("izibank cashback rules PDF HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const binaryHash=await sha256Bytes(bytes);
+  const parsed=await pdf(Buffer.from(bytes));
+  const raw=String(parsed.text||"").replace(/\r/g,"\n");
+  if(raw.length<500 || !/(кешбек|cashback|категор)/iu.test(raw)) throw new Error("izibank cashback rules PDF text extraction failed");
+  return {
+    status:res.status,
+    raw,
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:String(res.headers.get("content-type")||"application/pdf"),
+    binaryHash,
+    transport:"izibank_pdf_text",
+    resolvedUrl:sourceUrl
+  };
+}
+
 async function loadIdeaCashbackCategoriesPdfSource(sourceUrl:string) {
   const headers={
     "User-Agent":BROWSER_UA,
@@ -1617,6 +1729,9 @@ async function loadSource(source: any) {
     if (source.id === "idea-cashback-categories-pdf") {
       return await loadIdeaCashbackCategoriesPdfSource(source.url);
     }
+    if (source.id === "izibank-cashback-rules") {
+      return await loadIzibankCashbackRulesPdfSource(source.url);
+    }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
     try {
@@ -1649,6 +1764,9 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
+        if(source.id==="izibank-market") structured=normalizeIzibankMarketStructured(raw,text,structured);
+        if(source.id==="izibank-cashback-rules") structured=normalizeIzibankRulesStructured(text,structured);
         if(source.id==="abank-cashback") structured=normalizeAbankCashbackLandingStructured(raw,text,structured);
         if(source.id==="abank-cashback-rules") structured=normalizeAbankCashbackRulesStructured(text,structured);
         if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
@@ -1658,7 +1776,7 @@ async function loadSource(source: any) {
         hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
-      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules"].includes(source.id)){
+      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules"].includes(source.id)){
         const limits={...(structured.limits||{})};
         const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
         structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
@@ -1784,6 +1902,54 @@ async function loadSource(source: any) {
 
   const list=sources||[];
   for (let i=0;i<list.length;i+=6) await Promise.all(list.slice(i,i+6).map(scanOne));
+
+  // Cross-check official izibank pages. Public merchant rates remain app-only,
+  // but the two official landing pages should not advertise conflicting caps.
+  try {
+    const {data:iziRows}=await service.from("scanner_snapshots")
+      .select("source_id,structured_payload")
+      .eq("run_id",run.id)
+      .in("source_id",["izibank-cashback","izibank-market"]);
+    const iziMap=new Map((iziRows||[]).map((x:any)=>[x.source_id,x.structured_payload||{}]));
+    const main:any=iziMap.get("izibank-cashback")||{};
+    const market:any=iziMap.get("izibank-market")||{};
+    const mainCap=Number(main.market_rate_cap_percent);
+    const marketCap=Number(market.market_rate_cap_percent);
+    const capConflict=Number.isFinite(mainCap)&&Number.isFinite(marketCap)&&Math.abs(mainCap-marketCap)>0.0001;
+    const limitConflict=market.market_limit_claim_conflict===true;
+    if(capConflict||limitConflict){
+      const review={
+        kind:"official_source_conflict",
+        detected_on:new Date().toISOString().slice(0,10),
+        main_page_market_cap_percent:Number.isFinite(mainCap)?mainCap:null,
+        market_page_cap_percent:Number.isFinite(marketCap)?marketCap:null,
+        market_limit_claims:market.market_limit_claims||null,
+        reasons:[
+          ...(capConflict?["Official izicashback page and cashback-market page advertise different maximum market percentages."]:[]),
+          ...(limitConflict?["Cashback-market page simultaneously says there is no maximum cashback amount and mentions a monthly UAH amount."] : [])
+        ],
+        auto_publish:false
+      };
+      const conflictHash=await sha256(JSON.stringify(review));
+      const {data:existing}=await service.from("scanner_candidates").select("id")
+        .eq("source_id","izibank-market").eq("candidate_type","official_source_conflict")
+        .eq("new_hash",conflictHash).limit(1);
+      if(!existing?.length){
+        const {data:created,error}=await service.from("scanner_candidates").insert({
+          run_id:run.id,source_id:"izibank-market",bank:"izibank",candidate_type:"official_source_conflict",
+          priority:"high",source_role:"primary",old_hash:null,new_hash:conflictHash,affected_cells:[],
+          excerpt:"Official izibank pages contain conflicting cashback-market limits/caps.",
+          parser_version:PARSER_VERSION,structured_payload:{...market,source_consistency_review:review},status:"pending"
+        }).select("id").single();
+        if(!error&&created)candidates++;
+      }
+    } else {
+      await service.from("scanner_candidates").update({
+        status:"reviewed",review_note:"Автоматично закрито: офіційні сторінки izibank знову узгоджені.",
+        reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()
+      }).eq("source_id","izibank-market").eq("candidate_type","official_source_conflict").eq("status","pending");
+    }
+  } catch (_) {}
 
   // Coverage guard: reference-only matrix values must never look "verified".
   // A bank counts as covered only when the current scan contains comparable
