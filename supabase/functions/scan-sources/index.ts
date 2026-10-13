@@ -1,5 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import pdf from "npm:pdf-parse@1.1.1";
+import { Buffer } from "node:buffer";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -9,101 +11,38 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 37;
+const PARSER_VERSION = 47;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
 function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" },
-  });
+  return new Response(JSON.stringify(data), { status, headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } });
 }
-
 function decodeBasicEntities(s: string) {
-  return s
-    .replace(/&nbsp;|&#160;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&mdash;|&#8212;/gi, "—")
-    .replace(/&ndash;|&#8211;/gi, "–")
-    .replace(/&laquo;|&#171;/gi, "«")
-    .replace(/&raquo;|&#187;/gi, "»")
-    .replace(/&rsquo;|&#8217;/gi, "’");
+  return s.replace(/&nbsp;|&#160;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&mdash;|&#8212;/gi, "—").replace(/&ndash;|&#8211;/gi, "–").replace(/&laquo;|&#171;/gi, "«").replace(/&raquo;|&#187;/gi, "»").replace(/&rsquo;|&#8217;/gi, "’");
 }
-
 function cleanText(html: string) {
-  return decodeBasicEntities(
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ")
-      .replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, " ")
-      .replace(/<!--([\s\S]*?)-->/g, " ")
-      .replace(/<br\b[^>]*>/gi, "\n")
-      .replace(/<\/(?:p|div|li|section|article|main|aside|header|footer|h[1-6]|tr|td|th|ul|ol)>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-  )
-    .split(/\r?\n/)
-    .map((line) => line.replace(/[\t\f\v ]+/g, " ").trim())
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  return decodeBasicEntities(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ").replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, " ").replace(/<svg\b[^>]*>[\s\S]*?<\/svg>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\b[^>]*>/gi, "\n").replace(/<\/(?:p|div|li|section|article|main|aside|header|footer|h[1-6]|tr|td|th|ul|ol)>/gi, "\n").replace(/<[^>]+>/g, " "))
+    .split(/\r?\n/).map((line) => line.replace(/[\t\f\v ]+/g, " ").trim()).filter(Boolean).join("\n").trim();
 }
-
 function focusText(text: string) {
-  const rawChunks = text
-    .split(/\n+|(?<=[.!?;:])\s+(?=[A-ZА-ЯІЇЄҐ0-9])/u)
-    .map((x) => x.replace(/\s+/g, " ").trim())
-    .filter((x) => x.length >= 2 && x.length <= 1200);
-
-  const chunks: string[] = [];
-  const seen = new Set<string>();
-  for (const c of rawChunks) {
-    const key = c.toLocaleLowerCase("uk-UA");
-    if (!seen.has(key)) {
-      seen.add(key);
-      chunks.push(c);
-    }
-  }
-
+  const rawChunks = text.split(/\n+|(?<=[.!?;:])\s+(?=[A-ZА-ЯІЇЄҐ0-9])/u).map((x) => x.replace(/\s+/g, " ").trim()).filter((x) => x.length >= 2 && x.length <= 1200);
+  const chunks: string[] = [], seen = new Set<string>();
+  for (const c of rawChunks) { const key = c.toLocaleLowerCase("uk-UA"); if (!seen.has(key)) { seen.add(key); chunks.push(c); } }
   const keep = new Set<number>();
   for (let i = 0; i < chunks.length; i++) {
-    const c = chunks[i];
-    const semantic = SEMANTIC_RE.test(c);
-    const valued = VALUE_RE.test(c);
-    const usefulAnchor = (semantic && c.length >= 14) || (semantic && valued);
-    if (usefulAnchor) {
+    const c = chunks[i], semantic = SEMANTIC_RE.test(c), valued = VALUE_RE.test(c);
+    if ((semantic && c.length >= 14) || (semantic && valued)) {
       for (let j = Math.max(0, i - 3); j <= Math.min(chunks.length - 1, i + 4); j++) {
-        const neighbor = chunks[j];
-        if (j === i || VALUE_RE.test(neighbor) || SEMANTIC_RE.test(neighbor) || neighbor.length >= 20) keep.add(j);
+        const n = chunks[j]; if (j === i || VALUE_RE.test(n) || SEMANTIC_RE.test(n) || n.length >= 20) keep.add(j);
       }
     }
     if (valued && /%|₴|грн/i.test(c) && c.length <= 500) keep.add(i);
   }
-
-  let selected = [...keep].sort((a, b) => a - b).map((i) => chunks[i]);
-  if (!selected.length) selected = chunks.slice(0, 120);
-
-  return selected
-    .map((x) => x.replace(/\b(?:сьогодні|зараз)\b/gi, (m) => m.toLowerCase()))
-    .join("\n")
-    .slice(0, 100_000);
+  let selected = [...keep].sort((a,b)=>a-b).map((i)=>chunks[i]); if (!selected.length) selected = chunks.slice(0,120);
+  return selected.map((x)=>x.replace(/\b(?:сьогодні|зараз)\b/gi,(m)=>m.toLowerCase())).join("\n").slice(0,100_000);
 }
-
-async function sha256(input: string) {
-  const bytes = new TextEncoder().encode(input);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function sha256Bytes(bytes: Uint8Array) {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
+async function sha256(input: string) { const bytes = new TextEncoder().encode(input); const digest = await crypto.subtle.digest("SHA-256", bytes); return Array.from(new Uint8Array(digest)).map((b)=>b.toString(16).padStart(2,"0")).join(""); }
 function detectAccessBlock(raw: string) {
   const s = String(raw || "");
   const incapsula = /_Incapsula_Resource|\bincapsula\b|\bimperva\b/i.test(s);
@@ -114,10 +53,11 @@ function detectAccessBlock(raw: string) {
   if (s.length < 20_000 && (/<title>\s*Access Denied\s*<\/title>|\baccess denied\b/i.test(s))) return "access_denied";
   return null;
 }
-function titleFromHtml(html: string) {
-  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  return m ? cleanText(m[1]).slice(0, 300) : null;
+async function sha256Bytes(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+function titleFromHtml(html: string) { const m=html.match(/<title[^>]*>([\s\S]*?)<\/title>/i); return m ? cleanText(m[1]).slice(0,300) : null; }
 
 function parseRateNumber(raw) {
   const n = Number(String(raw || "").replace(",", "."));
@@ -446,6 +386,481 @@ function mergePumbPartnerRoster(structured, rawHtml) {
   };
 }
 
+
+const SENSE_MONTH_NAMES = [
+  "січень","лютий","березень","квітень","травень","червень",
+  "липень","серпень","вересень","жовтень","листопад","грудень"
+];
+
+function currentMonthWindow(now = new Date()) {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return {
+    valid_from: y + "-" + String(m).padStart(2,"0") + "-01",
+    valid_to: y + "-" + String(m).padStart(2,"0") + "-" + String(last).padStart(2,"0"),
+  };
+}
+
+function sensePartnerCategory(line) {
+  const x = compactLabel(line).toLocaleLowerCase("uk-UA");
+  const defs = [
+    ["Маркетплейси", /^маркетплейс(?:и)?$/u],
+    ["Одяг та взуття", /^одяг[,\s]+взуття(?:[,\s]+аксесуари)?$/u],
+    ["Аксесуари / багаж", /^аксесуари[,\s]+валізи$/u],
+    ["Краса", /^(?:beauty|краса)$/u],
+    ["Онлайн-сервіси", /^онлайн\s*сервіс(?:и)?$/u],
+    ["Техніка", /^техніка\s+та\s+електроніка$/u],
+    ["Дитячі товари", /^дитячі\s+товари$/u],
+    ["Тварини", /^товари\s+для\s+тварин$/u],
+    ["Книги та канцтовари", /^книгарні$/u],
+    ["Транспорт", /^транспорт$/u],
+    ["Медицина", /^медицина$/u],
+    ["Сад та город", /^сад\s+та\s+город$/u],
+    ["Аптеки", /^аптеки$/u],
+    ["Дім та ремонт", /^все\s+для\s+дому$/u],
+    ["Спорт", /^спорт\s+і\s+фітнес$/u],
+    ["Кафе та ресторани", /^кафе\s+і\s+ресторани$/u],
+    ["Продукти", /^продукти$/u],
+    ["Дім та ремонт", /^обладнання[,\s]+інструмент$/u],
+    ["Спорт", /^туризм[,\s]+військове\s+обладнання(?:\s+та\s+спорядження)?$/u],
+    ["Ювелірні вироби", /^ювелірні\s+вироби$/u],
+    ["Доставка", /^доставка$/u],
+  ];
+  for (const [name,re] of defs) if (re.test(x)) return name;
+  return null;
+}
+
+function extractSenseMonthlyPartnerRoster(text) {
+  const lines = String(text || "").split(/\n+/).map(compactLabel).filter(Boolean);
+  const start = lines.findIndex((x) => /спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер\p{L}*.*(?:поточн|цього|у\s+)?(?:місяц|20\d{2})/iu.test(x)
+    || /спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер\p{L}*.*Cash.?u\s*Club/iu.test(x));
+  if (start < 0) return [];
+  const month = currentMonthWindow();
+  const items = [];
+  const seen = new Set();
+  let category = null;
+
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^Користуйтеся\s+вигідними\s+пропозиціями/iu.test(line)) break;
+    const heading = sensePartnerCategory(line);
+    if (heading) { category = heading; continue; }
+    if (!/кешбек/iu.test(line)) continue;
+
+    const m = line.match(/^(.{2,90}?)\s*[–—-]\s*(.+)$/u);
+    if (!m) continue;
+    let name = compactLabel(m[1]).replace(/[«»"]/g,"").trim();
+    const offer = compactLabel(m[2]);
+    if (!name || /^(?:кешбек|спеціальні\s+пропозиції|розіграші)$/iu.test(name)) continue;
+
+    const pctMatches = [...offer.matchAll(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*кешбек\p{L}*/giu)];
+    const pct = pctMatches.length ? parseRateNumber(pctMatches[pctMatches.length - 1][1]) : null;
+    const fixed = offer.match(/(?:фіксован\p{L}*\s*)?кешбек\p{L}*\s*[–—-]?\s*(\d[\d\s]{0,6})\s*бонус/iu);
+    const fixedValue = fixed ? Number(String(fixed[1]).replace(/\s+/g,"")) : null;
+    if (pct === null && !(Number.isFinite(fixedValue) && fixedValue > 0)) continue;
+
+    const key = name.toLocaleLowerCase("uk-UA").replace(/[^a-zа-яіїєґ0-9]+/giu,"");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const currentValue = pct !== null ? (String(pct).replace(".",",") + "%") : (fixedValue + " бонусів / чек");
+    items.push({
+      kind: "partner",
+      name,
+      partner: name,
+      category,
+      rate_percent: pct,
+      rate_text: currentValue,
+      current_value: currentValue,
+      valid_from: month.valid_from,
+      valid_to: month.valid_to,
+      evidence: [line.slice(0,500)],
+      conditions: [offer.slice(0,500)],
+    });
+  }
+  return items;
+}
+
+function normalizeSenseMonthlyStructured(text, structured, resolvedUrl) {
+  const roster = extractSenseMonthlyPartnerRoster(text);
+  const month = currentMonthWindow();
+  return {
+    ...structured,
+    source_url: resolvedUrl || structured?.source_url || null,
+    resolved_source_url: resolvedUrl || null,
+    items: roster,
+    item_count: roster.length,
+    rates_percent: uniqNumbers(roster.map((x) => x.rate_percent).filter((x) => x !== null)),
+    valid_from: month.valid_from,
+    valid_to: month.valid_to,
+    partner_roster_count: roster.length,
+    partner_roster_source: "official_monthly_cashu_article",
+    confidence: roster.length >= 10 ? "review_ready" : "signal_only",
+  };
+}
+
+
+function vstPartnerCategory(name) {
+  const x = String(name || "").toLocaleLowerCase("uk-UA");
+  if (/брсм|neftek|нефтек/iu.test(x)) return "АЗС";
+  if (/e-zoo|zoo/iu.test(x)) return "Тварини";
+  if (/concert|сoncert/iu.test(x)) return "Розваги";
+  if (/apollo/iu.test(x)) return "Спорт";
+  if (/clinic|клінік/iu.test(x)) return "Медицина";
+  if (/дека|секунда/iu.test(x)) return "Ювелірні вироби";
+  if (/myplay/iu.test(x)) return "Дитячі товари";
+  return null;
+}
+
+function extractVstPartnerRoster(text) {
+  const lines = String(text || "").split(/\n+/).map(compactLabel).filter(Boolean);
+  const start = lines.findIndex((x) => /^Кешбек\s+від\s+партнерів$/iu.test(x));
+  if (start < 0) return [];
+  const items = [];
+  const seen = new Set();
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^(?:Відкрити\s+картку|Ми\s+використовуємо\s+файли\s+cookie)/iu.test(line)) break;
+    const m = line.match(/^(.{2,70}?)\s+(\d{1,3}(?:[.,]\d+)?)\s*%(?:\s+.*)?$/u);
+    if (!m) continue;
+    const name = compactLabel(m[1]).replace(/[«»"]/g,"").trim();
+    const rate = parseRateNumber(m[2]);
+    if (!name || rate === null || /(?:максимальн|кешбек|партнерськ)/iu.test(name)) continue;
+    const key = name.toLocaleLowerCase("uk-UA").replace(/[^a-zа-яіїєґ0-9]+/giu,"");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      kind: "partner", name, partner: name, category: vstPartnerCategory(name),
+      rate_percent: rate, rate_text: String(rate).replace(".",",") + "%",
+      current_value: String(rate).replace(".",",") + "%", valid_from: null, valid_to: null,
+      evidence: [line.slice(0,500)], conditions: []
+    });
+  }
+  return items;
+}
+
+function normalizeVstPartnerStructured(text, structured) {
+  const roster = extractVstPartnerRoster(text);
+  return {...structured,items:roster,item_count:roster.length,
+    rates_percent:uniqNumbers(roster.map((x)=>x.rate_percent).filter((x)=>x!==null)),
+    partner_roster_count:roster.length,partner_roster_source:"official_vst_partner_page",
+    confidence:roster.length>=5?"review_ready":"signal_only"};
+}
+
+
+function creditDniproPartnerNameFromUrl(rawUrl) {
+  try {
+    const host = new URL(rawUrl, "https://creditdnepr.com.ua").hostname.toLocaleLowerCase("uk-UA").replace(/^www\./,"");
+    if (/^(?:express\.)?auchan\.ua$/u.test(host)) return "Ашан";
+    if (/^(?:uk\.)?polis\.ua$/u.test(host)) return "Polis.ua";
+    if (/^(?:filiya\.)?mci\.ua$/u.test(host) || /^doc\.mci\.ua$/u.test(host)) return "МЦ Інго";
+    if (/^hotline\.finance$/u.test(host)) return "hotline.finance";
+    if (!host || host === "creditdnepr.com.ua" || host.endsWith(".creditdnepr.com.ua")) return null;
+    return host;
+  } catch { return null; }
+}
+
+function creditDniproPartnerCategory(name) {
+  const x=String(name||"").toLocaleLowerCase("uk-UA");
+  if (/auchan|ашан/iu.test(x)) return "Продукти";
+  if (/polis|hotline\.finance/iu.test(x)) return "Страхування";
+  if (/інго|mci/iu.test(x)) return "Медицина";
+  return null;
+}
+
+function extractCreditDniproPartnerRoster(rawHtml) {
+  const raw=String(rawHtml||"");
+  const marker=/Пропозиці(?:ї|&[a-z]+;)\s+від\s+партнерів/iu.exec(raw);
+  if(!marker) return [];
+  const start=marker.index;
+  let end=raw.search(/Завантажуйте\s+або\s+оновлюйте\s+мобільний\s+застосунок/iu);
+  if(end<0 || end<=start) end=Math.min(raw.length,start+40000);
+  const segment=raw.slice(start,end);
+  const items=[],seen=new Set();
+  for(const m of segment.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)){
+    const url=String(m[1]||"").trim();
+    const label=cleanText(String(m[2]||""));
+    const rateMatch=label.match(/(\d{1,3}(?:[.,]\d+)?)\s*%/u);
+    if(!rateMatch) continue;
+    const rate=parseRateNumber(rateMatch[1]);
+    const name=creditDniproPartnerNameFromUrl(url);
+    if(!name || rate===null) continue;
+    const key=partnerRosterKey(name);
+    if(!key || seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      kind:"partner",
+      name,
+      partner:name,
+      category:creditDniproPartnerCategory(name),
+      rate_percent:rate,
+      rate_text:String(rate).replace(".",",")+"%",
+      current_value:String(rate).replace(".",",")+"%",
+      valid_from:null,
+      valid_to:null,
+      evidence:[label.slice(0,500)],
+      conditions:[label.slice(0,500)],
+      source_url:new URL(url,"https://creditdnepr.com.ua").toString()
+    });
+  }
+  return items;
+}
+
+function mergeCreditDniproPartnerRoster(structured, rawHtml) {
+  const roster=extractCreditDniproPartnerRoster(rawHtml);
+  if(!roster.length) return structured;
+  const existing=Array.isArray(structured?.items)?structured.items:[];
+  const nonPartner=existing.filter((x)=>x?.kind!=="partner");
+  const merged=[...nonPartner,...roster];
+  return {
+    ...structured,
+    items:merged,
+    item_count:merged.length,
+    partner_roster_count:roster.length,
+    partner_roster_source:"official_cashback_partner_section",
+    confidence:roster.length>=2?"review_ready":(structured?.confidence||"signal_only")
+  };
+}
+
+
+function extractGlobusPartnerRoster(text) {
+  const lines=String(text||"").split(/\n+/).map(compactLabel).filter(Boolean);
+  const items=[],seen=new Set();
+  for(let i=0;i<lines.length;i++){
+    if(!/^OnTax[iі]$/iu.test(lines[i])) continue;
+    const window=lines.slice(i,Math.min(lines.length,i+12));
+    const rateLine=window.find((x)=>/^\d{1,3}(?:[.,]\d+)?\s*%$/u.test(x));
+    const rate=rateLine?parseRateNumber(rateLine):null;
+    if(rate===null) continue;
+    const name="OnTaxi";
+    const key=partnerRosterKey(name);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const desc=window.find((x)=>/всеукраїнськ.*онлайн-сервіс.*замовлення авто/iu.test(x))||"";
+    items.push({
+      kind:"partner",
+      name,
+      partner:name,
+      category:"Таксі",
+      rate_percent:rate,
+      rate_text:String(rate).replace(".",",")+"%",
+      current_value:String(rate).replace(".",",")+"%",
+      valid_from:null,
+      valid_to:null,
+      evidence:[...new Set([lines[i],desc,rateLine].filter(Boolean))].slice(0,3),
+      conditions:desc?[desc]:[]
+    });
+  }
+  return items;
+}
+
+function normalizeGlobusPartnerStructured(text,structured){
+  const roster=extractGlobusPartnerRoster(text);
+  const existing=Array.isArray(structured?.items)?structured.items:[];
+  const nonPartners=existing.filter((x)=>x?.kind!=="partner");
+  return {
+    ...structured,
+    items:[...nonPartners,...roster],
+    item_count:nonPartners.length+roster.length,
+    partner_roster_count:roster.length,
+    partner_roster_source:"official_visible_partner_cards",
+    partner_roster_complete:false,
+    partner_roster_note:"Офіційна сторінка підтверджує видимі партнерські картки, але не гарантує повний roster; відсутні партнери не вважаються такими, що вибули.",
+    confidence:roster.length?"review_ready":(structured?.confidence||"signal_only")
+  };
+}
+
+
+function fmtPct(value) {
+  if(value==null || !Number.isFinite(Number(value))) return null;
+  return String(Number(value)).replace(".",",")+"%";
+}
+
+function bisbankCategoryName(name) {
+  const x=compactLabel(name);
+  if(/^АЗС\s+та\s+електрозарядки$/iu.test(x)) return "АЗС";
+  return x;
+}
+
+function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
+  const raw=String(rawHtml||"");
+  const items=[];
+  const seen=new Set();
+  for(const m of raw.matchAll(/<div\s+class=["']h4["']>\s*([\s\S]*?)\s*<\/div>[\s\S]*?<div\s+class=["']description["']>\s*([\s\S]*?)\s*<\/div>/giu)){
+    const heading=bisbankCategoryName(cleanText(m[1]));
+    if(!heading || /рефераль|актуальні|пропозиці/iu.test(heading)) continue;
+    const desc=cleanText(m[2]);
+    const creditMatch=desc.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*кредитн\p{L}*\s+кошт/iu);
+    const ownMatch=desc.match(/(\d{1,3}(?:[.,]\d+)?)\s*%\s*власн\p{L}*\s+кошт/iu);
+    const credit=creditMatch?parseRateNumber(creditMatch[1]):null;
+    const own=ownMatch?parseRateNumber(ownMatch[1]):null;
+    if(credit===null && own===null) continue;
+    const key=evidenceNorm(heading);
+    if(seen.has(key)) continue;
+    seen.add(key);
+    const equal=credit!==null&&own!==null&&Math.abs(credit-own)<0.0001;
+    const currentValue=equal?fmtPct(credit):(own!==null&&credit!==null?`${fmtPct(own)} / ${fmtPct(credit)}`:(fmtPct(own??credit)||null));
+    const rate=[credit,own].filter((x)=>x!==null).reduce((a,b)=>Math.max(a,b),0);
+    items.push({
+      kind:"category",
+      name:heading,
+      category:heading,
+      partner:null,
+      rate_percent:rate,
+      rate_text:currentValue,
+      current_value:currentValue,
+      own_rate_percent:own,
+      credit_rate_percent:credit,
+      valid_from:null,
+      valid_to:null,
+      evidence:[`${heading}: ${desc}`.slice(0,700)],
+      conditions:[desc.slice(0,700)]
+    });
+  }
+  const limitMatch=String(text||"").match(/Максимальн\p{L}*\s+сума\s+кешбек\p{L}*\s+за\s+місяц\p{L}*\s*[—-]\s*(\d[\d\s]*)\s*грн/iu)
+    || String(text||"").match(/Максимальн\p{L}*\s+сума\s+кешбек\p{L}*[^\d]{0,50}(\d[\d\s]*)\s*грн/iu);
+  const maxCashback=limitMatch?Number(limitMatch[1].replace(/\s+/g,"")):500;
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:uniqNumbers(items.flatMap((x)=>[x.own_rate_percent,x.credit_rate_percent]).filter((x)=>x!==null)),
+    limits:{...(structured?.limits||{}),max_cashback_uah:Number.isFinite(maxCashback)?maxCashback:500},
+    selection:{...(structured?.selection||{}),cadence:"monthly",max_categories:3},
+    confidence:items.length>=5?"review_ready":"signal_only",
+    official_value_mode:"own_credit_pair",
+    current_offer_count:items.length
+  };
+}
+
+function ideaCashbackCategoryFromContext(context) {
+  const x=String(context||"").toLocaleLowerCase("uk-UA");
+  if(/таксі/iu.test(x)) return "Таксі";
+  if(/транспорт/iu.test(x)) return "Транспорт";
+  if(/краса|салон|космет/iu.test(x)) return "Краса";
+  if(/все\s+для\s+дому|мебл|будівниц/iu.test(x)) return "Дім та ремонт";
+  if(/аптек/iu.test(x)) return "Аптеки / здоров'я";
+  if(/маркетплейс/iu.test(x)) return "Маркетплейси";
+  if(/одяг|взут/iu.test(x)) return "Одяг та взуття";
+  if(/технік/iu.test(x)) return "Техніка";
+  if(/кафе|ресторан/iu.test(x)) return "Кафе та ресторани";
+  if(/\bазс\b/iu.test(x)) return "АЗС";
+  if(/продукт|супермаркет/iu.test(x)) return "Продукти";
+  return null;
+}
+
+function ideaDisplayPair(own,credit) {
+  const ownText=own===0?"—":fmtPct(own);
+  const creditText=credit===0?"—":fmtPct(credit);
+  if(ownText&&creditText) return ownText+" / "+creditText;
+  return ownText||creditText||null;
+}
+
+function normalizeIdeaCashbackPdfStructured(pdfItems, structured, resolvedUrl) {
+  const items=Array.isArray(pdfItems)?pdfItems:[];
+  const month=currentMonthWindow();
+  return {
+    ...structured,
+    source_url:resolvedUrl||structured?.source_url||null,
+    resolved_source_url:resolvedUrl||null,
+    items,
+    item_count:items.length,
+    rates_percent:uniqNumbers(items.flatMap((x)=>[x.own_rate_percent,x.credit_rate_percent]).filter((x)=>x!==null&&x!==undefined)),
+    category_pool:[...new Set(items.map((x)=>x.category).filter(Boolean))],
+    category_pool_source:"official_monthly_pdf",
+    valid_from:month.valid_from,
+    valid_to:month.valid_to,
+    selection:{...(structured?.selection||{}),cadence:"monthly",max_categories:2},
+    limits:{...(structured?.limits||{}),max_cashback_uah:500},
+    rate_document_url:resolvedUrl||null,
+    exact_rates_public_in_html:false,
+    exact_rates_in_official_pdf:true,
+    confidence:items.length>=3?"review_ready":"signal_only",
+    source_format:"pdf_text",
+    pdf_fingerprint_only:false
+  };
+}
+
+function normalizeIdeaCashbackStructured(rawHtml,text,structured) {
+  const raw=String(rawHtml||"");
+  const plain=String(text||"");
+  const categoryPool=[];
+  const add=(x)=>{ if(x&&!categoryPool.includes(x)) categoryPool.push(x); };
+  const hay=[raw,plain].join("\n").toLocaleLowerCase("uk-UA");
+  if(/транспорт/iu.test(hay)) add("Транспорт");
+  if(/краса\s+та\s+догляд|\bкраса\b/iu.test(hay)) add("Краса");
+  if(/аптек/iu.test(hay)) add("Аптеки / здоров'я");
+  if(/одяг\s+та\s+взуття/iu.test(hay)) add("Одяг та взуття");
+  if(/продукт/iu.test(hay)) add("Продукти");
+  if(/кафе\s+та\s+ресторани|кафе.*ресторани/iu.test(hay)) add("Кафе та ресторани");
+  if(/\bАЗС\b/iu.test(raw) || /\bазс\b/iu.test(hay)) add("АЗС");
+
+  const pdfMatch=raw.match(/href=["']([^"']*Katehorii-ta-vynahoroda-za-keshbekom\.pdf)["']/iu);
+  const rateDocumentUrl=pdfMatch?new URL(pdfMatch[1],"https://ideabank.ua").toString():null;
+  const currentMonth=currentMonthWindow();
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    category_pool:categoryPool,
+    category_pool_source:"official_cashback_faq",
+    selection:{cadence:"monthly",max_categories:2},
+    limits:{...(structured?.limits||{}),max_cashback_uah:500},
+    conditions:[
+      "Категорії активуються у мобільному O.Bank.",
+      "Щомісяця можна обрати дві категорії.",
+      "Кешбек нараховується за покупки за рахунок кредитних коштів.",
+      "Виведення бонусів доступне від 120 грн; максимальний ліміт виведення 500 грн на місяць."
+    ],
+    valid_from:currentMonth.valid_from,
+    valid_to:currentMonth.valid_to,
+    exact_rates_public_in_html:false,
+    rate_document_url:rateDocumentUrl,
+    rate_document_currently_linked:Boolean(rateDocumentUrl),
+    confidence:categoryPool.length>=5?"signal_only":(structured?.confidence||"signal_only")
+  };
+}
+
+function normalizeCrystalbankCashbackStructured(rawHtml,text,structured) {
+  const raw=String(rawHtml||"");
+  const block=raw.match(/MY\s+CRYSTALBANK\s+Cash[^<]{0,40}[\s\S]{0,900}?Власні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%[\s\S]{0,240}?Кредитні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const own=block?parseRateNumber(block[1]):null;
+  const credit=block?parseRateNumber(block[2]):null;
+  if(own===null&&credit===null) return structured;
+  const currentValue=own!==null&&credit!==null?`${fmtPct(own)} / ${fmtPct(credit)}`:(fmtPct(own??credit)||null);
+  const rate=[own,credit].filter((x)=>x!==null).reduce((a,b)=>Math.max(a,b),0);
+  const minMatch=String(text||"").match(/сума\s+кожн\p{L}*[^\d]{0,30}(\d[\d\s]*)\s*UAH/iu);
+  const maxMatch=String(text||"").match(/Максимальн\p{L}*\s+розмір\s+нарахуван\p{L}*[^\d]{0,50}(\d[\d\s]*)\s*UAH/iu);
+  const item={
+    kind:"base",
+    name:"Усі покупки",
+    category:"Усі покупки",
+    partner:null,
+    rate_percent:rate,
+    rate_text:currentValue,
+    current_value:currentValue,
+    own_rate_percent:own,
+    credit_rate_percent:credit,
+    valid_from:null,
+    valid_to:null,
+    evidence:[`MY CRYSTALBANK Cash’U: власні ${fmtPct(own)||"—"}, кредитні ${fmtPct(credit)||"—"}`],
+    conditions:["Безготівкові покупки в торгово-сервісній мережі України"]
+  };
+  return {
+    ...structured,
+    items:[item],
+    item_count:1,
+    rates_percent:uniqNumbers([own,credit].filter((x)=>x!==null)),
+    limits:{
+      ...(structured?.limits||{}),
+      min_purchase_uah:minMatch?Number(minMatch[1].replace(/\s+/g,"")):200,
+      max_cashback_uah:maxMatch?Number(maxMatch[1].replace(/\s+/g,"")):500
+    },
+    confidence:"review_ready",
+    official_value_mode:"own_credit_pair"
+  };
+}
+
 function partnerRosterKey(s) {
   return String(s || "")
     .toLocaleLowerCase("uk-UA")
@@ -454,12 +869,20 @@ function partnerRosterKey(s) {
 }
 
 async function buildPartnerRosterAudit(service, structured, bank) {
-  const officialNames = [...new Set(
-    (Array.isArray(structured?.items) ? structured.items : [])
-      .filter((item) => item?.kind === "partner" && (item?.partner || item?.name))
-      .map((item) => String(item.partner || item.name).trim())
-      .filter(Boolean)
-  )];
+  const officialItems = [];
+  const seenOfficial = new Set();
+  for (const item of (Array.isArray(structured?.items) ? structured.items : [])) {
+    if (item?.kind !== "partner" || !(item?.partner || item?.name)) continue;
+    const name = String(item.partner || item.name).trim();
+    const key = partnerRosterKey(name);
+    if (!name || !key || seenOfficial.has(key)) continue;
+    seenOfficial.add(key);
+    officialItems.push({
+      name,
+      rate_percent: item?.rate_percent == null ? null : Number(item.rate_percent),
+      current_value: item?.current_value || item?.rate_text || null,
+    });
+  }
 
   const { data: rows, error } = await service
     .from("scanner_partner_index")
@@ -479,13 +902,26 @@ async function buildPartnerRosterAudit(service, structured, bank) {
 
   const matched = new Set();
   const added = [];
-  for (const name of officialNames) {
-    const row = keyToRow.get(partnerRosterKey(name));
-    if (row) matched.add(row.partner_key);
-    else added.push(name);
+  const changedRates = [];
+  for (const item of officialItems) {
+    const row = keyToRow.get(partnerRosterKey(item.name));
+    if (!row) { added.push(item.name); continue; }
+    matched.add(row.partner_key);
+    const oldRate = row.rate_percent == null ? null : Number(row.rate_percent);
+    const newRate = item.rate_percent == null ? null : Number(item.rate_percent);
+    if (oldRate !== null && newRate !== null && Math.abs(oldRate - newRate) > 0.0001) {
+      changedRates.push({name:row.partner_name,old_value:(oldRate + "%"),new_value:(newRate + "%")});
+      continue;
+    }
+    const oldValue = String(row.current_value || "").replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+    const newValue = String(item.current_value || "").replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+    if (oldRate === null && newRate === null && oldValue && newValue && oldValue !== newValue) {
+      changedRates.push({name:row.partner_name,old_value:row.current_value,new_value:item.current_value});
+    }
   }
 
-  const missing = indexRows
+  const rosterComplete = structured?.partner_roster_complete !== false;
+  const missing = (rosterComplete ? indexRows : [])
     .filter((row) => !matched.has(row.partner_key))
     .map((row) => ({
       name: row.partner_name,
@@ -497,15 +933,63 @@ async function buildPartnerRosterAudit(service, structured, bank) {
 
   return {
     bank,
-    official_count: officialNames.length,
+    official_count: officialItems.length,
     indexed_count: indexRows.length,
     matched_count: matched.size,
     added_partners: added.sort((a,b)=>a.localeCompare(b,"uk")),
     missing_partners: missing.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
-    changed: added.length > 0 || missing.length > 0,
+    changed_rates: changedRates.sort((a,b)=>String(a.name).localeCompare(String(b.name),"uk")),
+    roster_complete: rosterComplete,
+    roster_note: structured?.partner_roster_note || null,
+    changed: added.length > 0 || missing.length > 0 || changedRates.length > 0,
     detected_on: new Date().toISOString().slice(0,10),
     auto_publish: false,
   };
+}
+
+
+const UK_MONTHS = [
+  ["січ",1],["лют",2],["берез",3],["квіт",4],["трав",5],["черв",6],
+  ["лип",7],["серп",8],["верес",9],["жовт",10],["листопад",11],["груд",12]
+];
+
+function monthFromUkrainianWord(word) {
+  const x=String(word||"").toLocaleLowerCase("uk-UA");
+  const hit=UK_MONTHS.find(([stem])=>x.startsWith(stem));
+  return hit?hit[1]:null;
+}
+
+function detectMonthlySourceIssue(sourceId,text) {
+  if(!["rada-rewards","unex-card"].includes(String(sourceId||""))) return null;
+  const now=new Date();
+  const currentYear=now.getUTCFullYear();
+  const currentMonth=now.getUTCMonth()+1;
+  const s=String(text||"");
+  const mentions=[];
+  const patterns=[
+    /категорі[їя]\s+кешбек\p{L}*\s+(?:на|у)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu,
+    /кешбек[^\n]{0,60}?\s(?:у|на)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu,
+    /розрахову(?:й|йте)[^\n]{0,60}?\s(?:у|в)\s+([А-ЯІЇЄҐа-яіїєґ]+)(?:\s+(20\d{2}))?/giu
+  ];
+  for(const re of patterns){
+    for(const m of s.matchAll(re)){
+      const month=monthFromUkrainianWord(m[1]);
+      if(!month) continue;
+      const year=m[2]?Number(m[2]):currentYear;
+      mentions.push({month,year,text:compactLabel(m[0]).slice(0,240)});
+    }
+  }
+  const unique=[...new Map(mentions.map(x=>[`${x.year}-${String(x.month).padStart(2,"0")}`,x])).values()];
+  if(!unique.length) return null;
+  const currentKey=`${currentYear}-${String(currentMonth).padStart(2,"0")}`;
+  const keys=unique.map(x=>`${x.year}-${String(x.month).padStart(2,"0")}`);
+  if(keys.includes(currentKey) && keys.some(x=>x!==currentKey)){
+    return {kind:"inconsistent",current_period:currentKey,detected_periods:keys,evidence:unique.map(x=>x.text),auto_publish:false};
+  }
+  if(!keys.includes(currentKey)){
+    return {kind:"stale",current_period:currentKey,detected_periods:keys,evidence:unique.map(x=>x.text),auto_publish:false};
+  }
+  return null;
 }
 
 function evidenceNorm(s) {
@@ -532,6 +1016,23 @@ function evidenceAliases(s) {
   if(/усі покупки|всі покупки/.test(n)) return ["усі покупки","всі покупки","усі покупки","всі товари"];
   return n.split(" ").filter(x=>x.length>=4).slice(0,3);
 }
+function percentList(s) {
+  return [...String(s||"").replace(/,/g,".").matchAll(/(\d+(?:\.\d+)?)\s*%/g)]
+    .map((m)=>Number(m[1]))
+    .filter((x)=>Number.isFinite(x));
+}
+function hasExactOfficialEvidence(cell, structured) {
+  const aliases=evidenceAliases(cell?.category||"");
+  const items=Array.isArray(structured?.items)?structured.items:[];
+  return items.some((item)=>{
+    const t=evidenceNorm([item?.category,item?.name,...(Array.isArray(item?.evidence)?item.evidence:[])].filter(Boolean).join(" "));
+    const categoryHit=aliases.some((a)=>a&&t.includes(evidenceNorm(a)));
+    if(!categoryHit) return false;
+    const explicit=item?.current_value||item?.rate_text||"";
+    return item?.rate_percent!=null || percentList(explicit).length>0;
+  });
+}
+
 function filterAffectedByEvidence(affected, structured) {
   const items=Array.isArray(structured?.items)?structured.items:[];
   const pool=Array.isArray(structured?.category_pool)?structured.category_pool:[];
@@ -848,31 +1349,16 @@ Deno.serve(async (req) => {
   if (sourceError) return json({ error: sourceError.message }, 500);
 
   const staleBefore = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  await service.from("scanner_runs")
-    .update({ status: "failed", finished_at: new Date().toISOString(), summary: { reason: "stale_run_auto_closed" } })
-    .eq("status", "running")
-    .lt("started_at", staleBefore);
+  await service.from("scanner_runs").update({status:"failed",finished_at:new Date().toISOString(),summary:{reason:"stale_run_auto_closed"}}).eq("status","running").lt("started_at",staleBefore);
 
-  const { data: activeRuns } = await service.from("scanner_runs")
-    .select("id,started_at,trigger_kind")
-    .eq("status", "running")
-    .gte("started_at", staleBefore)
-    .order("started_at", { ascending: false })
-    .limit(1);
-  if (activeRuns?.length) {
-    return json({ status: "already_running", run_id: activeRuns[0].id, started_at: activeRuns[0].started_at, trigger_kind: activeRuns[0].trigger_kind });
-  }
+  const {data:activeRuns}=await service.from("scanner_runs").select("id,started_at,trigger_kind").eq("status","running").gte("started_at",staleBefore).order("started_at",{ascending:false}).limit(1);
+  if(activeRuns?.length) return json({status:"already_running",run_id:activeRuns[0].id,started_at:activeRuns[0].started_at,trigger_kind:activeRuns[0].trigger_kind});
 
-  const { data: run, error: runError } = await service.from("scanner_runs").insert({
-    triggered_by: user.id,
-    trigger_kind: "admin_manual",
-    total_sources: sources?.length || 0,
-    status: "running",
-  }).select("id").single();
+  const { data: run, error: runError } = await service.from("scanner_runs").insert({ triggered_by: user.id, trigger_kind: "admin_manual", total_sources: sources?.length || 0, status: "running" }).select("id").single();
   if (runError || !run) return json({ error: runError?.message || "Could not create run" }, 500);
 
-  let changed = 0, failed = 0, candidates = 0;
-  const results: unknown[] = [];
+  let changed=0, failed=0, candidates=0;
+  const results: unknown[]=[];
 
   async function readFetchedResponse(res: Response) {
   const bytes = new Uint8Array(await res.arrayBuffer());
@@ -935,85 +1421,184 @@ async function loadMastercardSubscriptionSource() {
   };
 }
 
+
+async function loadSenseMonthlyPartnersSource() {
+  const root = "https://sensebank.ua";
+  const headers = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.7",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+  };
+  const hubRes = await fetch(root + "/cash-u", { redirect:"follow", headers, signal:AbortSignal.timeout(15000) });
+  if (!hubRes.ok) throw new Error("Sense Cash'u hub HTTP " + hubRes.status);
+  const hubHtml = await hubRes.text();
+  const monthName = SENSE_MONTH_NAMES[new Date().getUTCMonth()];
+  let articleUrl = "";
+  for (const m of hubHtml.matchAll(/<a\b[^>]*href=["']([^"']*\/cash-u-news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)) {
+    const label = cleanText(m[2]).toLocaleLowerCase("uk-UA");
+    if (label.includes(monthName) && /cash.?u\s*club/iu.test(label)) {
+      articleUrl = new URL(m[1], root).toString();
+      break;
+    }
+  }
+  if (!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
+  const articleRes = await fetch(articleUrl, { redirect:"follow", headers, signal:AbortSignal.timeout(15000) });
+  if (!articleRes.ok) throw new Error("Sense monthly article HTTP " + articleRes.status);
+  const articleHtml = await articleRes.text();
+  if (!/Спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер/iu.test(cleanText(articleHtml))) {
+    throw new Error("Sense monthly partner section not found");
+  }
+  return {
+    status: articleRes.status,
+    raw: articleHtml,
+    responseBytes: new TextEncoder().encode(articleHtml).byteLength,
+    documentType: "html",
+    contentType: String(articleRes.headers.get("content-type") || "text/html"),
+    transport: "sense_monthly_article",
+    resolvedUrl: articleUrl,
+  };
+}
+
+async function loadIdeaCashbackCategoriesPdfSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://ideabank.ua/uk/cashback",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(20000)});
+  if(!res.ok) throw new Error("Idea cashback PDF HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const binaryHash=await sha256Bytes(bytes);
+  const pages:any[]=[];
+  const pagerender=async(pageData:any)=>{
+    const tc=await pageData.getTextContent({normalizeWhitespace:false,disableCombineTextItems:false});
+    const items=(tc.items||[]).map((it:any)=>({
+      s:String(it.str||""),
+      x:Number(it.transform?.[4]||0),
+      y:Number(it.transform?.[5]||0),
+      w:Number(it.width||0),
+      h:Number(it.height||0)
+    }));
+    pages.push(items);
+    return items.map((x:any)=>x.s).join(" ");
+  };
+  const parsed=await pdf(Buffer.from(bytes),{pagerender});
+  const layout=(pages[0]||[]).filter((x:any)=>String(x.s||"").trim());
+  const now=new Date();
+  const monthNames=["січень","лютий","березень","квітень","травень","червень","липень","серпень","вересень","жовтень","листопад","грудень"];
+  const monthName=monthNames[now.getUTCMonth()];
+  const yy=String(now.getUTCFullYear()).slice(-2);
+  const header=layout.find((x:any)=>String(x.s||"").toLocaleLowerCase("uk-UA").includes(monthName)&&String(x.s||"").includes(yy));
+  if(!header) throw new Error("Idea cashback PDF current-month column not found");
+
+  const currentRates=layout.filter((x:any)=>{
+    const s=String(x.s||"").trim();
+    return /^\d{1,3}(?:[.,]\d+)?%\s*\/\s*\d{1,3}(?:[.,]\d+)?%$/u.test(s) && Math.abs(Number(x.x)-Number(header.x))<=28;
+  });
+  const out:any[]=[];
+  const seen=new Set<string>();
+  const month=currentMonthWindow();
+
+  for(const rate of currentRates){
+    const nearby=layout
+      .filter((x:any)=>Number(x.x)<240&&Math.abs(Number(x.y)-Number(rate.y))<=8)
+      .sort((a:any,b:any)=>Number(a.x)-Number(b.x))
+      .map((x:any)=>String(x.s||"").trim())
+      .filter(Boolean);
+    const context=nearby.join(" ");
+    const category=ideaCashbackCategoryFromContext(context);
+    if(!category||seen.has(category)) continue;
+    const m=String(rate.s||"").match(/(\d{1,3}(?:[.,]\d+)?)%\s*\/\s*(\d{1,3}(?:[.,]\d+)?)%/u);
+    if(!m) continue;
+    const own=parseRateNumber(m[1]),credit=parseRateNumber(m[2]);
+    if(own===null||credit===null) continue;
+    seen.add(category);
+    const shown=ideaDisplayPair(own,credit);
+    out.push({
+      kind:"category",
+      name:category,
+      category,
+      partner:null,
+      rate_percent:Math.max(own,credit),
+      rate_text:shown,
+      current_value:shown,
+      own_rate_percent:own,
+      credit_rate_percent:credit,
+      valid_from:month.valid_from,
+      valid_to:month.valid_to,
+      evidence:[(context+" · "+String(rate.s||"")).trim()],
+      conditions:[
+        "Щомісяця в O.Bank обираються дві категорії.",
+        "Кешбек нараховується за покупки кредитними коштами."
+      ]
+    });
+  }
+  if(out.length<3) throw new Error("Idea cashback PDF parsed too few current-month rates: "+out.length);
+  return {
+    status:res.status,
+    raw:String(parsed.text||""),
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:String(res.headers.get("content-type")||"application/pdf"),
+    binaryHash,
+    transport:"idea_pdf_text",
+    resolvedUrl:sourceUrl,
+    ideaPdfItems:out
+  };
+}
+
 async function loadSource(source: any) {
     if (source.id === "oschad-subscriptions-rules") {
       return await loadMastercardSubscriptionSource();
     }
+    if (source.id === "sense-partners-monthly") {
+      return await loadSenseMonthlyPartnersSource();
+    }
+    if (source.id === "idea-cashback-categories-pdf") {
+      return await loadIdeaCashbackCategoriesPdfSource(source.url);
+    }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
     try {
-      const res = await fetch(source.url, {
-        redirect: "follow",
-        headers: {
-          "User-Agent": BROWSER_UA,
-          "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-          "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-          "Cache-Control": "no-cache",
-          "Pragma": "no-cache",
-        },
-        signal: AbortSignal.timeout(15_000),
-      });
-      const fetched = await readFetchedResponse(res);
-      const raw = fetched.raw;
-      if (res.ok) return { status: res.status, raw, responseBytes: fetched.responseBytes, documentType: fetched.documentType, contentType: fetched.contentType, binaryHash: fetched.binaryHash || null, transport: fetched.documentType === "pdf" ? "edge_fetch_pdf" : "edge_fetch" };
-      if (detectAccessBlock(raw)) blockedDirect = { status: res.status, raw, responseBytes: fetched.responseBytes, documentType: fetched.documentType, contentType: fetched.contentType, transport: "edge_fetch_blocked" };
-      directError = new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      directError = e;
-    }
-
+      const res = await fetch(source.url, { redirect:"follow", headers:{ "User-Agent":BROWSER_UA, "Accept":"text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8", "Accept-Language":"uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7", "Cache-Control":"no-cache", "Pragma":"no-cache" }, signal:AbortSignal.timeout(15_000) });
+      const fetched=await readFetchedResponse(res), raw=fetched.raw; if (res.ok) return { status:res.status, raw, responseBytes:fetched.responseBytes, documentType:fetched.documentType, contentType:fetched.contentType, binaryHash:fetched.binaryHash||null, transport:fetched.documentType==="pdf"?"edge_fetch_pdf":"edge_fetch" }; if (detectAccessBlock(raw)) blockedDirect={ status:res.status, raw, responseBytes:fetched.responseBytes, documentType:fetched.documentType, contentType:fetched.contentType, transport:"edge_fetch_blocked" }; directError=new Error(`HTTP ${res.status}`);
+    } catch(e) { directError=e; }
     const { data, error } = await service.rpc("scanner_fetch_source", { p_source_id: source.id });
-    const row = Array.isArray(data) ? data[0] : data;
-    if (!error && row) {
-      const fallbackRaw = String(row.content || "");
-      if (Number(row.status) >= 200 && Number(row.status) < 300) {
-        return { status: Number(row.status), raw: fallbackRaw, transport: "db_http_fallback" };
-      }
-      if (detectAccessBlock(fallbackRaw)) {
-        return { status: Number(row.status), raw: fallbackRaw, transport: "db_http_fallback_blocked" };
-      }
-    }
+    const row=Array.isArray(data)?data[0]:data;
+    if (!error && row) { const fallbackRaw=String(row.content||""); if (Number(row.status)>=200 && Number(row.status)<300) return { status:Number(row.status), raw:fallbackRaw, transport:"db_http_fallback" }; if (detectAccessBlock(fallbackRaw)) return { status:Number(row.status), raw:fallbackRaw, transport:"db_http_fallback_blocked" }; }
     if (blockedDirect) return blockedDirect;
-    const fallbackMessage = error?.message || (row ? `HTTP ${row.status}` : "Fallback returned no data");
-    const directMessage = directError instanceof Error ? directError.message : String(directError || "Direct fetch failed");
-    throw new Error(`${directMessage}; fallback: ${fallbackMessage}`);
+    const f=error?.message||(row?`HTTP ${row.status}`:"Fallback returned no data"); const d=directError instanceof Error?directError.message:String(directError||"Direct fetch failed"); throw new Error(`${d}; fallback: ${f}`);
   }
 
-  async function scanOne(source: any) {
-    const oldHash = source.last_hash || null;
-    const sourceFingerprintVersion = Number(source.fingerprint_version || 0);
+  async function scanOne(source:any) {
+    const oldHash=source.last_hash||null, sourceFingerprintVersion=Number(source.fingerprint_version||0);
     try {
-      const loaded = await loadSource(source);
-      const raw = loaded.raw;
-      const responseBytes = Number(loaded.responseBytes || new TextEncoder().encode(raw).byteLength);
-      const isPdf = loaded.documentType === "pdf";
-      const accessBlock = isPdf ? null : detectAccessBlock(raw);
-      let text = "", focused = "", safeFocused = "";
-      let pageTitle = isPdf ? (source.purpose || source.bank || "Official PDF") : (safeDbText(titleFromHtml(raw) || '') || null);
-      let categoryPool: string[] = [];
-      let structured: any;
-      let hash: string;
-      if (isPdf) {
-        const { data: previousRows } = await service.from("scanner_snapshots").select("structured_payload,title,text_excerpt").eq("source_id", source.id).not("structured_payload", "is", null).order("fetched_at", { ascending: false }).limit(1);
-        const previous = previousRows?.[0] || null;
-        const cached = previous?.structured_payload && typeof previous.structured_payload === "object" ? previous.structured_payload : null;
-        const binaryHash = String(loaded.binaryHash || "");
-        if (!binaryHash) throw new Error("PDF fingerprint missing");
-        const pdfChanged = !!oldHash && sourceFingerprintVersion === FINGERPRINT_VERSION && oldHash !== binaryHash;
-        structured = cached ? {...cached,parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||cached.bank||null,source_url:source.url,source_role:source.source_role||cached.source_role||"primary",data_mode:source.data_mode||cached.data_mode||"fixed",publish_policy:source.publish_policy||cached.publish_policy||"review_required",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged}
-          : {parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||null,source_url:source.url,source_role:source.source_role||"primary",data_mode:source.data_mode||"fixed",publish_policy:source.publish_policy||"review_required",parser_profile:source.parser_profile||"rules",review_policy:{auto_publish:false,official_primary:source.source_role==="primary",reference_only:source.source_role==="reference",manual_only:true,requires_human_review:true},unsupported:false,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null,confidence:"fingerprint_only",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged};
-        pageTitle = previous?.title || pageTitle;
-        safeFocused = safeDbText(previous?.text_excerpt || "");
-        hash = binaryHash;
-      } else {
-        text = cleanText(raw);
-        categoryPool = extractDefinedCategoryPool(text, source.id);
-        focused = focusText(text);
-        safeFocused = safeDbText(focused);
-        structured = extractStructured(source, focused, pageTitle);
-        if (source.id === "creditdnepr-cashback") structured = normalizeCreditDniproStructured(text, structured);
-        if (source.id === "pumb-cashback") structured = mergePumbPartnerRoster(structured, raw);
-        hash = await sha256(accessBlock ? `__source_health__:${accessBlock}:${source.url}` : safeFocused);
+      const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), isPdf=loaded.documentType==="pdf", accessBlock=isPdf?null:detectAccessBlock(raw);
+      let text="", focused="", safeFocused="", pageTitle=isPdf?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null), categoryPool:any[]=[], structured:any, hash:string;
+      if(isPdf){
+        const {data:previousRows}=await service.from("scanner_snapshots").select("structured_payload,title,text_excerpt").eq("source_id",source.id).not("structured_payload","is",null).order("fetched_at",{ascending:false}).limit(1);
+        const previous=previousRows?.[0]||null, cached=previous?.structured_payload&&typeof previous.structured_payload==="object"?previous.structured_payload:null, binaryHash=String(loaded.binaryHash||"");
+        if(!binaryHash) throw new Error("PDF fingerprint missing");
+        const pdfChanged=!!oldHash&&sourceFingerprintVersion===FINGERPRINT_VERSION&&oldHash!==binaryHash;
+        structured=cached?{...cached,parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||cached.bank||null,source_url:source.url,source_role:source.source_role||cached.source_role||"primary",data_mode:source.data_mode||cached.data_mode||"fixed",publish_policy:source.publish_policy||cached.publish_policy||"review_required",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged}:{parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||null,source_url:source.url,source_role:source.source_role||"primary",data_mode:source.data_mode||"fixed",publish_policy:source.publish_policy||"review_required",parser_profile:source.parser_profile||"rules",review_policy:{auto_publish:false,official_primary:source.source_role==="primary",reference_only:source.source_role==="reference",manual_only:true,requires_human_review:true},unsupported:false,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null,confidence:"fingerprint_only",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged};
+        pageTitle=previous?.title||pageTitle; safeFocused=safeDbText(previous?.text_excerpt||""); hash=binaryHash;
+      }else{
+        text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
+        if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
+        if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
+        if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
+        if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
+        if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
+        if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
+        if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
+        if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
+        hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
       if(explicitMaxCashback!==null){
@@ -1021,325 +1606,252 @@ async function loadSource(source: any) {
         const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
         structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
       }
-      if (source.id === "rada-rewards" && loaded.documentType !== "pdf") {
+      if(source.id==="rada-rewards"&&loaded.documentType!=="pdf"){
         const rada=extractRadaRewardsCards(raw);
         if(rada.items.length){
           const existing=Array.isArray(structured.items)?structured.items:[];
           const keys=new Set(existing.map(x=>JSON.stringify([x.kind,x.name,x.rate_percent,x.valid_from,x.valid_to])));
           const merged=[...existing];
-          for(const item of rada.items){
-            const key=JSON.stringify([item.kind,item.name,item.rate_percent,item.valid_from,item.valid_to]);
-            if(!keys.has(key)){keys.add(key);merged.push(item);}
-          }
+          for(const item of rada.items){const key=JSON.stringify([item.kind,item.name,item.rate_percent,item.valid_from,item.valid_to]);if(!keys.has(key)){keys.add(key);merged.push(item);}}
           structured={...structured,items:merged,item_count:merged.length,valid_from:rada.valid_from||structured.valid_from,valid_to:rada.valid_to||structured.valid_to,confidence:"review_ready"};
         }
       }
-      structured = { ...structured, source_format: loaded.documentType || "html", content_type: loaded.contentType || null };
-      if (categoryPool.length) structured = { ...structured, category_pool: categoryPool, category_pool_source: "official_definitions" };
+      structured={...structured,source_format:loaded.documentType||"html",content_type:loaded.contentType||null,resolved_source_url:loaded.resolvedUrl||structured.resolved_source_url||null};
+      const monthlySourceIssue=!structured.unsupported?detectMonthlySourceIssue(source.id,text):null;
+      if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
+      if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      if (source.id === "pumb-cashback" && !structured.unsupported) {
-        partnerRosterAudit = await buildPartnerRosterAudit(service, structured, "ПУМБ");
-        structured = { ...structured, partner_audit: partnerRosterAudit };
+      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":null))));
+      if(partnerAuditBank&&!structured.unsupported){
+        partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
+        structured={...structured,partner_audit:partnerRosterAudit};
       }
-      if (accessBlock) {
-        structured = {...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      }
-      const isInitial = !oldHash || sourceFingerprintVersion !== FINGERPRINT_VERSION;
-      const isChanged = !isInitial && oldHash !== hash && !structured.unsupported;
-
-      const { error: snapshotError } = await service.from("scanner_snapshots").insert({
-        run_id: run.id,
-        source_id: source.id,
-        http_status: loaded.status,
-        content_hash: hash,
-        response_bytes: responseBytes,
-        title: pageTitle,
-        text_excerpt: structured.unsupported ? "" : safeFocused.slice(0, 8_000),
-        error: null,
-        parser_version: PARSER_VERSION,
-        structured_payload: structured,
-      });
-      if (snapshotError) throw new Error("Snapshot insert failed: " + snapshotError.message);
-
-      await service.from("scanner_sources").update({
-        last_checked_at: new Date().toISOString(),
-        last_http_status: loaded.status,
-        last_hash: hash,
-        last_error: null,
-        fingerprint_version: FINGERPRINT_VERSION,
-      }).eq("id", source.id);
-
-      // Keep an existing review task aligned with the newest parser output even when
-      // the source content hash itself did not change.
-      const { data: pendingEvidence } = await service.from("scanner_candidates")
-        .select("id,structured_payload")
-        .eq("source_id", source.id)
-        .eq("candidate_type", "reference_to_official_review")
-        .eq("new_hash", hash)
-        .eq("status", "pending")
-        .limit(1);
-      if (pendingEvidence?.length) {
-        const prev = pendingEvidence[0].structured_payload || {};
-        const refreshedPayload = {
-          ...structured,
-          ...(prev.bootstrap_review ? { bootstrap_review: prev.bootstrap_review } : {}),
-        };
-        const {data:currentRefs}=await service.from("scanner_matrix_index")
-          .select("cell_key,bank,category,current_value,source_tier,source_url")
-          .eq("bank",source.bank)
-          .eq("source_tier","reference");
+      if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
+      const isInitial=!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION, isChanged=!isInitial&&oldHash!==hash&&!structured.unsupported;
+      const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
+      await service.from("scanner_sources").update({ last_checked_at:new Date().toISOString(), last_http_status:loaded.status, last_hash:hash, last_error:null, fingerprint_version:FINGERPRINT_VERSION }).eq("id",source.id);
+      // Refresh existing pending evidence after parser upgrades without creating duplicate tasks.
+      const {data:pendingEvidence}=await service.from("scanner_candidates").select("id,structured_payload").eq("source_id",source.id).eq("candidate_type","reference_to_official_review").eq("new_hash",hash).eq("status","pending").limit(1);
+      if(pendingEvidence?.length){
+        const prev=pendingEvidence[0].structured_payload||{};
+        const refreshedPayload={...structured,...(prev.bootstrap_review?{bootstrap_review:prev.bootstrap_review}:{})};
+        const {data:currentRefs}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
         const comparableAffected=filterAffectedByEvidence(currentRefs||[],structured);
         const updatePayload=comparableAffected.length
           ? {excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,affected_cells:comparableAffected,updated_at:new Date().toISOString()}
           : {excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,affected_cells:[],status:"rejected",review_note:"Автоматично закрито: поточне офіційне джерело не містить зіставного підтвердження для reference-комірок.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()};
-        await service.from("scanner_candidates").update(updatePayload).eq("id", pendingEvidence[0].id);
+        await service.from("scanner_candidates").update(updatePayload).eq("id",pendingEvidence[0].id);
       }
-
-      let candidate: any = null;
-
-      if (partnerRosterAudit) {
-        const auditHash = await sha256(JSON.stringify({
-          added: partnerRosterAudit.added_partners,
-          missing: partnerRosterAudit.missing_partners.map((x:any)=>x.name),
-        }));
-        if (partnerRosterAudit.changed) {
-          const { data: existingRoster } = await service.from("scanner_candidates")
-            .select("id")
-            .eq("source_id", source.id)
-            .eq("candidate_type", "partner_roster_changed")
-            .eq("new_hash", auditHash)
-            .limit(1);
-          if (!existingRoster?.length) {
-            const { data: rosterCandidate, error: rosterError } = await service.from("scanner_candidates").insert({
-              run_id: run.id,
-              source_id: source.id,
-              bank: source.bank || "ПУМБ",
-              candidate_type: "partner_roster_changed",
-              priority: "high",
-              source_role: source.source_role,
-              old_hash: oldHash,
-              new_hash: auditHash,
-              affected_cells: [],
-              excerpt: `Офіційний roster ПУМБ: +${partnerRosterAudit.added_partners.length} / -${partnerRosterAudit.missing_partners.length}`,
-              parser_version: PARSER_VERSION,
-              structured_payload: structured,
-              status: "pending",
-            }).select("id,candidate_type,priority").single();
-            if (!rosterError && rosterCandidate) { candidate = rosterCandidate; candidates++; }
+      let candidate:any=null;
+      if(partnerRosterAudit){
+        const auditHash=await sha256(JSON.stringify({added:partnerRosterAudit.added_partners,missing:partnerRosterAudit.missing_partners.map((x:any)=>x.name),changed_rates:partnerRosterAudit.changed_rates||[]}));
+        if(partnerRosterAudit.changed){
+          const {data:existingRoster}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("new_hash",auditHash).limit(1);
+          if(!existingRoster?.length){
+            const {data:rosterCandidate,error:rosterError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||partnerAuditBank,candidate_type:"partner_roster_changed",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:auditHash,affected_cells:[],excerpt:`Офіційний roster ${partnerAuditBank}: +${partnerRosterAudit.added_partners.length} / -${partnerRosterAudit.missing_partners.length} / ставки Δ${(partnerRosterAudit.changed_rates||[]).length}`,parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"}).select("id,candidate_type,priority").single();
+            if(!rosterError&&rosterCandidate){candidate=rosterCandidate;candidates++;}
           }
-        } else {
-          await service.from("scanner_candidates")
-            .update({
-              status: "reviewed",
-              review_note: "Автоматично закрито: офіційний roster партнерів знову збігається з partner index.",
-              reviewed_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-            .eq("source_id", source.id)
-            .eq("candidate_type", "partner_roster_changed")
-            .eq("status", "pending");
+        }else{
+          await service.from("scanner_candidates").update({status:"reviewed",review_note:"Автоматично закрито: офіційний roster партнерів знову збігається з partner index.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()}).eq("source_id",source.id).eq("candidate_type","partner_roster_changed").eq("status","pending");
         }
       }
-
+      if (!candidate && structured.monthly_source_review) {
+        const issue=structured.monthly_source_review;
+        const type=issue.kind==="inconsistent"?"official_monthly_source_inconsistent":"official_monthly_source_stale";
+        const issueHash=await sha256(JSON.stringify({type,current:issue.current_period,detected:issue.detected_periods,evidence:issue.evidence}));
+        const {data:existingMonthly}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type",type).eq("new_hash",issueHash).limit(1);
+        if(!existingMonthly?.length){
+          const {data:monthlyCandidate,error:monthlyError}=await service.from("scanner_candidates").insert({
+            run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:type,priority:"high",source_role:source.source_role,
+            old_hash:oldHash,new_hash:issueHash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:structured,status:"pending"
+          }).select("id,candidate_type,priority").single();
+          if(!monthlyError&&monthlyCandidate){candidate=monthlyCandidate;candidates++;}
+        }
+      }
       if (isChanged && !candidate) {
         changed++;
-        let affected: any[] = [];
-        let type = source.source_role === "reference" ? "reference_change_signal" : "official_source_changed";
-        let priority = source.source_role === "reference" ? "low" : "normal";
-
-        if (source.source_role === "reference") {
-          const { data } = await service.from("scanner_matrix_index")
-            .select("cell_key,bank,category,current_value,source_tier,source_url")
-            .eq("source_url", source.url);
-          affected = data || [];
+        let affected:any[]=[], type=source.source_role==="reference"?"reference_change_signal":"official_source_changed", priority=source.source_role==="reference"?"low":"normal";
+        if (source.source_role==="reference") {
+          const {data}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("source_url",source.url); affected=data||[];
         } else if (source.bank) {
-          const matrixEvidenceProfile = ["cashback","categories","rules"].includes(String(source.parser_profile || ""));
-          const hasComparableEvidence = Number(structured.item_count || 0) > 0 || (Array.isArray(structured.category_pool) && structured.category_pool.length > 0);
-          if (matrixEvidenceProfile && hasComparableEvidence) {
-            const { data } = await service.from("scanner_matrix_index")
-              .select("cell_key,bank,category,current_value,source_tier,source_url")
-              .eq("bank", source.bank)
-              .eq("source_tier", "reference");
-            affected = filterAffectedByEvidence(data || [], structured);
-          }
-          if (matrixEvidenceProfile && hasComparableEvidence && affected.length) {
-            type = "reference_to_official_review";
-            priority = "high";
-          } else if (source.data_mode === "dynamic" || source.data_mode === "personalized" || source.publish_policy === "manual_only") {
-            type = "dynamic_or_personalized_source_changed";
-            priority = "high";
-          }
+          const matrixEvidenceProfile=["cashback","categories","rules"].includes(String(source.parser_profile||""));
+          const hasComparableEvidence=Number(structured.item_count||0)>0||(Array.isArray(structured.category_pool)&&structured.category_pool.length>0);
+          if (matrixEvidenceProfile&&hasComparableEvidence) { const {data}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference"); affected=filterAffectedByEvidence(data||[],structured); }
+          if (matrixEvidenceProfile&&hasComparableEvidence&&affected.length) { type="reference_to_official_review"; priority="high"; }
+          else if (source.data_mode==="dynamic"||source.data_mode==="personalized"||source.publish_policy==="manual_only") { type="dynamic_or_personalized_source_changed"; priority="high"; }
         }
-
-        const { data, error } = await service.from("scanner_candidates").insert({
-          run_id: run.id,
-          source_id: source.id,
-          bank: source.bank || null,
-          candidate_type: type,
-          priority,
-          source_role: source.source_role,
-          old_hash: oldHash,
-          new_hash: hash,
-          affected_cells: affected,
-          excerpt: safeFocused.slice(0, 6_000),
-          parser_version: PARSER_VERSION,
-          structured_payload: structured,
-          status: "pending",
-        }).select("id,candidate_type,priority").single();
-        if (!error && data) { candidate = data; candidates++; }
+        const {data,error}=await service.from("scanner_candidates").insert({ run_id:run.id, source_id:source.id, bank:source.bank||null, candidate_type:type, priority, source_role:source.source_role, old_hash:oldHash, new_hash:hash, affected_cells:affected, excerpt:safeFocused.slice(0,6000), parser_version:PARSER_VERSION, structured_payload:structured, status:"pending" }).select("id,candidate_type,priority").single();
+        if (!error&&data) { candidate=data; candidates++; }
       }
-
-      if (!candidate && source.source_role === "primary" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length < 80)) {
-        const { data: existingUnreadable } = await service.from("scanner_candidates")
-          .select("id")
-          .eq("source_id", source.id)
-          .eq("candidate_type", "official_source_unreadable")
-          .eq("new_hash", hash)
-          .limit(1);
+      if (!candidate && source.source_role==="primary" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length<80)) {
+        const {data:existingUnreadable}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_unreadable").eq("new_hash",hash).limit(1);
         if (!existingUnreadable?.length) {
-          const unreadablePayload = {
-            ...structured,
-            source_health: {
-              readable: false,
-              detected_on: new Date().toISOString().slice(0, 10),
-              reason: structured.unsupported ? (structured.reason || "unsupported_content") : "empty_or_too_short_excerpt",
-              excerpt_length: safeFocused.trim().length,
-              response_bytes: responseBytes,
-              transport: loaded.transport,
-              auto_publish: false,
-            },
-          };
-          const { data: unreadableCandidate, error: unreadableError } = await service.from("scanner_candidates").insert({
-            run_id: run.id,
-            source_id: source.id,
-            bank: source.bank || null,
-            candidate_type: "official_source_unreadable",
-            priority: "high",
-            source_role: source.source_role,
-            old_hash: oldHash,
-            new_hash: hash,
-            affected_cells: [],
-            excerpt: safeFocused.slice(0, 6_000),
-            parser_version: PARSER_VERSION,
-            structured_payload: unreadablePayload,
-            status: "pending",
-          }).select("id,candidate_type,priority").single();
-          if (!unreadableError && unreadableCandidate) { candidate = unreadableCandidate; candidates++; }
+          const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
+          const {data:unreadableCandidate,error:unreadableError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:"official_source_unreadable",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:hash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:unreadablePayload,status:"pending"}).select("id,candidate_type,priority").single();
+          if (!unreadableError&&unreadableCandidate) { candidate=unreadableCandidate; candidates++; }
         }
       }
-
-      if (!candidate && isInitial && source.source_role === "primary" && source.bank && ["cashback","categories","rules"].includes(String(source.parser_profile || "")) && !structured.unsupported && safeFocused.trim().length >= 80 && (Number(structured.item_count || 0) > 0 || (Array.isArray(structured.category_pool) && structured.category_pool.length > 0))) {
-        const { data: affected } = await service.from("scanner_matrix_index")
-          .select("cell_key,bank,category,current_value,source_tier,source_url")
-          .eq("bank", source.bank)
-          .eq("source_tier", "reference");
-        const comparableAffected = filterAffectedByEvidence(affected || [], structured);
+      if (!candidate && isInitial && source.source_role==="primary" && source.bank && ["cashback","categories","rules"].includes(String(source.parser_profile||"")) && !structured.unsupported && safeFocused.trim().length>=80 && (Number(structured.item_count||0)>0 || (Array.isArray(structured.category_pool)&&structured.category_pool.length>0))) {
+        const {data:affected}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
+        const comparableAffected=filterAffectedByEvidence(affected||[],structured);
         if (comparableAffected.length) {
-          const affected = comparableAffected;
-          const { data: existingBootstrap } = await service.from("scanner_candidates")
-            .select("id")
-            .eq("source_id", source.id)
-            .eq("candidate_type", "reference_to_official_review")
-            .eq("new_hash", hash)
-            .limit(1);
+          const affected=comparableAffected;
+          const {data:existingBootstrap}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","reference_to_official_review").eq("new_hash",hash).limit(1);
           if (!existingBootstrap?.length) {
-            const bootstrapPayload = {
-              ...structured,
-              bootstrap_review: {
-                detected_on: new Date().toISOString().slice(0, 10),
-                reason: "official_source_added_for_reference_cells",
-                affected_count: affected.length,
-                auto_publish: false,
-              },
-            };
-            const { data: bootstrapCandidate, error: bootstrapError } = await service.from("scanner_candidates").insert({
-              run_id: run.id,
-              source_id: source.id,
-              bank: source.bank,
-              candidate_type: "reference_to_official_review",
-              priority: "high",
-              source_role: source.source_role,
-              old_hash: oldHash,
-              new_hash: hash,
-              affected_cells: affected,
-              excerpt: safeFocused.slice(0, 6_000),
-              parser_version: PARSER_VERSION,
-              structured_payload: bootstrapPayload,
-              status: "pending",
-            }).select("id,candidate_type,priority").single();
-            if (!bootstrapError && bootstrapCandidate) { candidate = bootstrapCandidate; candidates++; }
+            const bootstrapPayload={...structured,bootstrap_review:{detected_on:new Date().toISOString().slice(0,10),reason:"official_source_added_for_reference_cells",affected_count:affected.length,auto_publish:false}};
+            const {data:bootstrapCandidate,error:bootstrapError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank,candidate_type:"reference_to_official_review",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:hash,affected_cells:affected,excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:bootstrapPayload,status:"pending"}).select("id,candidate_type,priority").single();
+            if (!bootstrapError&&bootstrapCandidate) { candidate=bootstrapCandidate; candidates++; }
           }
         }
       }
-
-      if (!candidate && source.source_role === "primary" && source.data_mode === "fixed" && source.publish_policy === "review_required" && !structured.unsupported && structured.valid_to) {
-        const today = new Date().toISOString().slice(0, 10);
-        if (String(structured.valid_to) < today) {
-          const { data: existingExpiry } = await service.from("scanner_candidates")
-            .select("id")
-            .eq("source_id", source.id)
-            .eq("candidate_type", "official_source_expired")
-            .eq("new_hash", hash)
-            .limit(1);
+      if (!candidate && source.source_role==="primary" && source.data_mode==="fixed" && source.publish_policy==="review_required" && !structured.unsupported && structured.valid_to) {
+        const today=new Date().toISOString().slice(0,10);
+        if (String(structured.valid_to)<today) {
+          const {data:existingExpiry}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_expired").eq("new_hash",hash).limit(1);
           if (!existingExpiry?.length) {
-            let affected: any[] = [];
-            const { data: exactAffected } = await service.from("scanner_matrix_index")
-              .select("cell_key,bank,category,current_value,source_tier,source_url")
-              .eq("source_url", source.url);
-            affected = exactAffected || [];
-            const expiryPayload = {
-              ...structured,
-              expiry_review: {
-                expired_on: structured.valid_to,
-                detected_on: today,
-                reason: "official_source_validity_ended",
-                auto_publish: false,
-              },
-            };
-            const { data: expiryCandidate, error: expiryError } = await service.from("scanner_candidates").insert({
-              run_id: run.id,
-              source_id: source.id,
-              bank: source.bank || null,
-              candidate_type: "official_source_expired",
-              priority: "high",
-              source_role: source.source_role,
-              old_hash: oldHash,
-              new_hash: hash,
-              affected_cells: affected,
-              excerpt: safeFocused.slice(0, 6_000),
-              parser_version: PARSER_VERSION,
-              structured_payload: expiryPayload,
-              status: "pending",
-            }).select("id,candidate_type,priority").single();
-            if (!expiryError && expiryCandidate) { candidate = expiryCandidate; candidates++; }
+            const {data:exactAffected}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("source_url",source.url);
+            const expiryPayload={...structured,expiry_review:{expired_on:structured.valid_to,detected_on:today,reason:"official_source_validity_ended",auto_publish:false}};
+            const {data:expiryCandidate,error:expiryError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:"official_source_expired",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:hash,affected_cells:exactAffected||[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:expiryPayload,status:"pending"}).select("id,candidate_type,priority").single();
+            if (!expiryError&&expiryCandidate) { candidate=expiryCandidate; candidates++; }
           }
         }
       }
-
-      results.push({ source_id: source.id, bank: source.bank, status: loaded.status, transport: loaded.transport, fingerprint_version: FINGERPRINT_VERSION, parser_version: PARSER_VERSION, structured_items: structured.item_count || 0, baseline: isInitial, changed: isChanged, candidate });
-    } catch (e) {
-      failed++;
-      const message = e instanceof Error ? e.message : String(e);
-      await service.from("scanner_snapshots").insert({ run_id: run.id, source_id: source.id, error: message.slice(0, 1000) });
-      await service.from("scanner_sources").update({ last_checked_at: new Date().toISOString(), last_error: message.slice(0, 1000) }).eq("id", source.id);
-      results.push({ source_id: source.id, bank: source.bank, baseline: !oldHash || sourceFingerprintVersion !== FINGERPRINT_VERSION, error: message });
+      results.push({source_id:source.id,bank:source.bank,status:loaded.status,transport:loaded.transport,fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,structured_items:structured.item_count||0,baseline:isInitial,changed:isChanged,candidate});
+    } catch(e) {
+      failed++; const message=e instanceof Error?e.message:String(e);
+      await service.from("scanner_snapshots").insert({run_id:run.id,source_id:source.id,error:message.slice(0,1000)});
+      await service.from("scanner_sources").update({last_checked_at:new Date().toISOString(),last_error:message.slice(0,1000)}).eq("id",source.id);
+      results.push({source_id:source.id,bank:source.bank,baseline:!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION,error:message});
     }
   }
 
-  const list = sources || [];
-  for (let i = 0; i < list.length; i += 6) {
-    await Promise.all(list.slice(i, i + 6).map(scanOne));
+  const list=sources||[];
+  for (let i=0;i<list.length;i+=6) await Promise.all(list.slice(i,i+6).map(scanOne));
+
+  // Coverage guard: reference-only matrix values must never look "verified".
+  // A bank counts as covered only when the current scan contains comparable
+  // evidence from an enabled primary official source, not merely because
+  // some official page is registered in scanner_sources.
+  try {
+    const {data:referenceCells}=await service
+      .from("scanner_matrix_index")
+      .select("cell_key,bank,category,current_value,source_tier,source_url")
+      .eq("source_tier","reference");
+    const {data:primarySources}=await service
+      .from("scanner_sources")
+      .select("id,bank,data_mode,publish_policy")
+      .eq("enabled",true)
+      .eq("source_role","primary")
+      .not("bank","is",null);
+    const {data:runSnapshots}=await service
+      .from("scanner_snapshots")
+      .select("source_id,structured_payload")
+      .eq("run_id",run.id);
+
+    const sourceById=new Map((primarySources||[]).map((x:any)=>[String(x.id),x]));
+    const payloadsByBank=new Map<string,any[]>();
+    for(const snap of (runSnapshots||[])){
+      const src=sourceById.get(String(snap.source_id||""));
+      if(!src) continue;
+      const bank=String(src.bank||"").trim();
+      const payload=snap.structured_payload||{};
+      if(!bank || payload.unsupported) continue;
+      if(!payloadsByBank.has(bank)) payloadsByBank.set(bank,[]);
+      payloadsByBank.get(bank)!.push(payload);
+    }
+
+    const byBank=new Map<string,any[]>();
+    for(const cell of (referenceCells||[])){
+      const bank=String(cell.bank||"").trim();
+      if(!bank) continue;
+      if(!byBank.has(bank)) byBank.set(bank,[]);
+      byBank.get(bank)!.push(cell);
+    }
+
+    for(const [bank,cells] of byBank.entries()){
+      const officialPayloads=payloadsByBank.get(bank)||[];
+      const uncovered=cells.filter(cell=>!officialPayloads.some(payload=>hasExactOfficialEvidence(cell,payload)));
+      const sorted=[...uncovered].sort((a,b)=>String(a.cell_key).localeCompare(String(b.cell_key),"uk"));
+
+      if(!sorted.length){
+        await service.from("scanner_candidates").update({
+          status:"reviewed",
+          review_note:"Автоматично закрито: поточний скан має зіставне первинне офіційне підтвердження для всіх reference-комірок банку.",
+          reviewed_at:new Date().toISOString(),
+          updated_at:new Date().toISOString()
+        }).eq("bank",bank).in("candidate_type",["reference_without_official_source","reference_without_official_evidence"]).eq("status","pending");
+        continue;
+      }
+
+      const hasPrimary=(primarySources||[]).some((x:any)=>String(x.bank||"").trim()===bank);
+      const reason=hasPrimary?"no_matching_official_evidence":"no_enabled_primary_official_source";
+      const candidateType="reference_without_official_evidence";
+      const gapHash=await sha256(JSON.stringify({
+        bank,
+        reason,
+        cells:sorted.map(x=>[x.cell_key,x.current_value]),
+        official_sources:(primarySources||[]).filter((x:any)=>String(x.bank||"").trim()===bank).map((x:any)=>x.id).sort()
+      }));
+      const {data:existingGap}=await service.from("scanner_candidates")
+        .select("id")
+        .eq("bank",bank)
+        .eq("candidate_type",candidateType)
+        .eq("new_hash",gapHash)
+        .limit(1);
+      if(existingGap?.length) continue;
+
+      await service.from("scanner_candidates").update({
+        status:"reviewed",
+        review_note:"Автоматично закрито: замінено детальнішою перевіркою наявності офіційного доказу.",
+        reviewed_at:new Date().toISOString(),
+        updated_at:new Date().toISOString()
+      }).eq("bank",bank).eq("candidate_type","reference_without_official_source").eq("status","pending");
+
+      const sourceIds=(primarySources||[])
+        .filter((x:any)=>String(x.bank||"").trim()===bank)
+        .map((x:any)=>String(x.id));
+      const payload={
+        bank,
+        coverage_gap:{
+          reason,
+          affected_count:sorted.length,
+          total_reference_count:cells.length,
+          official_source_ids:sourceIds,
+          detected_on:new Date().toISOString().slice(0,10),
+          auto_publish:false
+        },
+        review_policy:{
+          auto_publish:false,
+          official_primary:false,
+          reference_only:true,
+          manual_only:true,
+          requires_human_review:true
+        },
+        items:[]
+      };
+      const {data:gapCandidate,error:gapError}=await service.from("scanner_candidates").insert({
+        run_id:run.id,
+        source_id:sourceIds[0]||null,
+        bank,
+        candidate_type:candidateType,
+        priority:"high",
+        source_role:"reference",
+        old_hash:null,
+        new_hash:gapHash,
+        affected_cells:sorted,
+        excerpt:hasPrimary
+          ?"Офіційне джерело банку підключене, але поточний скан не містить зіставного підтвердження для частини reference-комірок."
+          :"У матриці є значення з довідкових джерел, але для цього банку в сканері не підключено первинне офіційне джерело.",
+        parser_version:PARSER_VERSION,
+        structured_payload:payload,
+        status:"pending"
+      }).select("id,candidate_type,priority").single();
+      if(!gapError&&gapCandidate) candidates++;
+    }
+  } catch(e) {
+    results.push({coverage_guard_error:e instanceof Error?e.message:String(e)});
   }
-
-  const finalStatus = failed === list.length && list.length > 0 ? "failed" : (failed ? "partial" : "completed");
-  await service.from("scanner_runs").update({
-    finished_at: new Date().toISOString(),
-    status: finalStatus,
-    changed_sources: changed,
-    failed_sources: failed,
-    candidates_created: candidates,
-    summary: { fingerprint_version: FINGERPRINT_VERSION, parser_version: PARSER_VERSION, results },
-  }).eq("id", run.id);
-
-  return json({ run_id: run.id, status: finalStatus, total_sources: list.length, changed_sources: changed, failed_sources: failed, candidates_created: candidates, fingerprint_version: FINGERPRINT_VERSION, parser_version: PARSER_VERSION, results });
+  const finalStatus=failed===list.length&&list.length>0?"failed":(failed?"partial":"completed");
+  await service.from("scanner_runs").update({finished_at:new Date().toISOString(),status:finalStatus,changed_sources:changed,failed_sources:failed,candidates_created:candidates,summary:{fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results}}).eq("id",run.id);
+  return json({run_id:run.id,status:finalStatus,total_sources:list.length,changed_sources:changed,failed_sources:failed,candidates_created:candidates,fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results});
 });
