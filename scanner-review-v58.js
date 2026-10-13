@@ -293,7 +293,9 @@
     const reference=c.source_role==='reference'||review.reference_only;
     const classes=['sf-candidate',c.priority==='high'?'high':'',c.priority==='low'?'low':''].filter(Boolean).join(' ');
     const effectiveSourceUrl=p.resolved_source_url||src.url||'';
+    const rateDocumentUrl=p.rate_document_url||'';
     const sourceLink=effectiveSourceUrl?`<a class="sf-source-link" href="${esc(effectiveSourceUrl)}" target="_blank" rel="noopener">Відкрити джерело ↗</a>`:'';
+    const rateDocumentLink=rateDocumentUrl?`<a class="sf-source-link" href="${esc(rateDocumentUrl)}" target="_blank" rel="noopener">Документ зі ставками ↗</a>`:'';
     const autoNote=reference
       ? 'Це лише сигнал із довідкового джерела. Дані з нього не публікуються — спочатку потрібне офіційне підтвердження.'
       : (review.manual_only?'Джерело динамічне або персоналізоване — тільки ручна перевірка.':'Офіційне джерело. Результат все одно потребує ручної перевірки перед зміною сайту.');
@@ -347,6 +349,7 @@
         <div class="sf-note">${esc(autoNote)}</div>
         <div class="sf-candidate-actions">
           ${sourceLink}
+          ${rateDocumentLink}
           ${c.status==='pending'&&c.candidate_type==='reference_to_official_review'&&exactMatchCount?`<button class="sf-scan-btn primary" data-confirm-official>${exactMatchCount===1?'Підтвердити 1 збіг офіційно':`Підтвердити ${exactMatchCount} збігів офіційно`}</button>`:''}
           ${c.status==='pending'?'<button class="sf-scan-btn" data-review="reviewed">Позначити переглянутим</button><button class="sf-scan-btn danger" data-review="rejected">Відхилити</button>':''}
         </div>
