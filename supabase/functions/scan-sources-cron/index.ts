@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 44;
+const PARSER_VERSION = 45;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1501,8 +1501,10 @@ async function loadSource(source: any) {
   const list=sources||[];
   for (let i=0;i<list.length;i+=6) await Promise.all(list.slice(i,i+6).map(scanOne));
 
-  // Coverage guard: reference-only matrix values must never look "verified"
-  // when SaveFlow has no enabled primary official source for that bank.
+  // Coverage guard: reference-only matrix values must never look "verified".
+  // A bank counts as covered only when the current scan contains comparable
+  // evidence from an enabled primary official source, not merely because
+  // some official page is registered in scanner_sources.
   try {
     const {data:referenceCells}=await service
       .from("scanner_matrix_index")
@@ -1510,12 +1512,27 @@ async function loadSource(source: any) {
       .eq("source_tier","reference");
     const {data:primarySources}=await service
       .from("scanner_sources")
-      .select("bank")
+      .select("id,bank,data_mode,publish_policy")
       .eq("enabled",true)
       .eq("source_role","primary")
       .not("bank","is",null);
+    const {data:runSnapshots}=await service
+      .from("scanner_snapshots")
+      .select("source_id,structured_payload")
+      .eq("run_id",run.id);
 
-    const primaryBanks=new Set((primarySources||[]).map((x:any)=>String(x.bank||"")).filter(Boolean));
+    const sourceById=new Map((primarySources||[]).map((x:any)=>[String(x.id),x]));
+    const payloadsByBank=new Map<string,any[]>();
+    for(const snap of (runSnapshots||[])){
+      const src=sourceById.get(String(snap.source_id||""));
+      if(!src) continue;
+      const bank=String(src.bank||"").trim();
+      const payload=snap.structured_payload||{};
+      if(!bank || payload.unsupported) continue;
+      if(!payloadsByBank.has(bank)) payloadsByBank.set(bank,[]);
+      payloadsByBank.get(bank)!.push(payload);
+    }
+
     const byBank=new Map<string,any[]>();
     for(const cell of (referenceCells||[])){
       const bank=String(cell.bank||"").trim();
@@ -1525,29 +1542,54 @@ async function loadSource(source: any) {
     }
 
     for(const [bank,cells] of byBank.entries()){
-      if(primaryBanks.has(bank)){
+      const officialPayloads=payloadsByBank.get(bank)||[];
+      const uncovered=cells.filter(cell=>!officialPayloads.some(payload=>filterAffectedByEvidence([cell],payload).length>0));
+      const sorted=[...uncovered].sort((a,b)=>String(a.cell_key).localeCompare(String(b.cell_key),"uk"));
+
+      if(!sorted.length){
         await service.from("scanner_candidates").update({
           status:"reviewed",
-          review_note:"Автоматично закрито: для банку вже підключене первинне офіційне джерело.",
+          review_note:"Автоматично закрито: поточний скан має зіставне первинне офіційне підтвердження для всіх reference-комірок банку.",
           reviewed_at:new Date().toISOString(),
           updated_at:new Date().toISOString()
-        }).eq("bank",bank).eq("candidate_type","reference_without_official_source").eq("status","pending");
+        }).eq("bank",bank).in("candidate_type",["reference_without_official_source","reference_without_official_evidence"]).eq("status","pending");
         continue;
       }
-      const sorted=[...cells].sort((a,b)=>String(a.cell_key).localeCompare(String(b.cell_key),"uk"));
-      const gapHash=await sha256(JSON.stringify({bank,cells:sorted.map(x=>[x.cell_key,x.current_value])}));
+
+      const hasPrimary=(primarySources||[]).some((x:any)=>String(x.bank||"").trim()===bank);
+      const reason=hasPrimary?"no_matching_official_evidence":"no_enabled_primary_official_source";
+      const candidateType="reference_without_official_evidence";
+      const gapHash=await sha256(JSON.stringify({
+        bank,
+        reason,
+        cells:sorted.map(x=>[x.cell_key,x.current_value]),
+        official_sources:(primarySources||[]).filter((x:any)=>String(x.bank||"").trim()===bank).map((x:any)=>x.id).sort()
+      }));
       const {data:existingGap}=await service.from("scanner_candidates")
         .select("id")
         .eq("bank",bank)
-        .eq("candidate_type","reference_without_official_source")
+        .eq("candidate_type",candidateType)
         .eq("new_hash",gapHash)
         .limit(1);
       if(existingGap?.length) continue;
+
+      await service.from("scanner_candidates").update({
+        status:"reviewed",
+        review_note:"Автоматично закрито: замінено детальнішою перевіркою наявності офіційного доказу.",
+        reviewed_at:new Date().toISOString(),
+        updated_at:new Date().toISOString()
+      }).eq("bank",bank).eq("candidate_type","reference_without_official_source").eq("status","pending");
+
+      const sourceIds=(primarySources||[])
+        .filter((x:any)=>String(x.bank||"").trim()===bank)
+        .map((x:any)=>String(x.id));
       const payload={
         bank,
         coverage_gap:{
-          reason:"no_enabled_primary_official_source",
+          reason,
           affected_count:sorted.length,
+          total_reference_count:cells.length,
+          official_source_ids:sourceIds,
           detected_on:new Date().toISOString().slice(0,10),
           auto_publish:false
         },
@@ -1562,15 +1604,17 @@ async function loadSource(source: any) {
       };
       const {data:gapCandidate,error:gapError}=await service.from("scanner_candidates").insert({
         run_id:run.id,
-        source_id:null,
+        source_id:sourceIds[0]||null,
         bank,
-        candidate_type:"reference_without_official_source",
+        candidate_type:candidateType,
         priority:"high",
         source_role:"reference",
         old_hash:null,
         new_hash:gapHash,
         affected_cells:sorted,
-        excerpt:"У матриці є значення з довідкових джерел, але для цього банку в сканері не підключено первинне офіційне джерело.",
+        excerpt:hasPrimary
+          ?"Офіційне джерело банку підключене, але поточний скан не містить зіставного підтвердження для частини reference-комірок."
+          :"У матриці є значення з довідкових джерел, але для цього банку в сканері не підключено первинне офіційне джерело.",
         parser_version:PARSER_VERSION,
         structured_payload:payload,
         status:"pending"
