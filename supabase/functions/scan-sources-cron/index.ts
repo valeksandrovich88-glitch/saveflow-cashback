@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 57;
+const PARSER_VERSION = 58;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -806,7 +806,7 @@ function normalizeIzibankMarketStructured(rawHtml,text,structured) {
     public_partner_resource_refs:refs,
     partner_roster_complete:false,
     partner_roster_note:"Public page exposes a rotating logo strip and sends users to the app for merchant names, rates and conditions; absence from the public strip must not be treated as removal.",
-    market_limit_claim_conflict:Boolean(noLimit&&monthly600),
+    market_limit_claim_conflict:false,
     market_limit_claims:{
       no_maximum_claim:noLimit,
       monthly_amount_uah:monthly600?Number(String(monthly600[1]).replace(/\s+/g,"")):null
@@ -2122,10 +2122,12 @@ async function loadSource(source: any) {
     const mainCap=Number(main.market_rate_cap_percent);
     const marketCap=Number(market.market_rate_cap_percent);
     const capConflict=Number.isFinite(mainCap)&&Number.isFinite(marketCap)&&Math.abs(mainCap-marketCap)>0.0001;
-    const limitConflict=market.market_limit_claim_conflict===true;
+    const limitConflict=false;
     if(capConflict||limitConflict){
       const review={
-        kind:"official_source_conflict",
+        kind:"official_overview_mismatch",
+        authoritative_source_id:"izibank-market",
+        overview_source_id:"izibank-cashback",
         detected_on:new Date().toISOString().slice(0,10),
         main_page_market_cap_percent:Number.isFinite(mainCap)?mainCap:null,
         market_page_cap_percent:Number.isFinite(marketCap)?marketCap:null,
@@ -2138,22 +2140,22 @@ async function loadSource(source: any) {
       };
       const conflictHash=await sha256(JSON.stringify(review));
       const {data:existing}=await service.from("scanner_candidates").select("id")
-        .eq("source_id","izibank-market").eq("candidate_type","official_source_conflict")
+        .eq("source_id","izibank-market").eq("candidate_type","official_overview_mismatch")
         .eq("new_hash",conflictHash).limit(1);
       if(!existing?.length){
         const {data:created,error}=await service.from("scanner_candidates").insert({
-          run_id:run.id,source_id:"izibank-market",bank:"izibank",candidate_type:"official_source_conflict",
-          priority:"high",source_role:"primary",old_hash:null,new_hash:conflictHash,affected_cells:[],
-          excerpt:"Official izibank pages contain conflicting cashback-market limits/caps.",
+          run_id:run.id,source_id:"izibank-market",bank:"izibank",candidate_type:"official_overview_mismatch",
+          priority:"normal",source_role:"primary",old_hash:null,new_hash:conflictHash,affected_cells:[],
+          excerpt:"Generic izibank overview differs from the dedicated cashback-market page; the dedicated page is authoritative for the market cap.",
           parser_version:PARSER_VERSION,structured_payload:{...market,source_consistency_review:review},status:"pending"
         }).select("id").single();
         if(!error&&created)candidates++;
       }
     } else {
       await service.from("scanner_candidates").update({
-        status:"reviewed",review_note:"Автоматично закрито: офіційні сторінки izibank знову узгоджені.",
+        status:"reviewed",review_note:"Автоматично закрито: загальна сторінка izibank і dedicated cashback-market page знову узгоджені.",
         reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()
-      }).eq("source_id","izibank-market").eq("candidate_type","official_source_conflict").eq("status","pending");
+      }).eq("source_id","izibank-market").eq("candidate_type","official_overview_mismatch").eq("status","pending");
     }
   } catch (_) {}
 
@@ -2178,7 +2180,9 @@ async function loadSource(source: any) {
     const minConflict=Number.isFinite(landingMin)&&Number.isFinite(rulesMin)&&Math.abs(landingMin-rulesMin)>0.0001;
     if(taxConflict||maxConflict||minConflict){
       const review={
-        kind:"official_source_conflict",
+        kind:"official_overview_mismatch",
+        authoritative_source_id:"abank-cashback-rules",
+        overview_source_id:"abank-cashback",
         bank:"àбанк",
         detected_on:new Date().toISOString().slice(0,10),
         fields:{
@@ -2195,22 +2199,22 @@ async function loadSource(source: any) {
       };
       const conflictHash=await sha256(JSON.stringify(review));
       const {data:existing}=await service.from("scanner_candidates").select("id")
-        .eq("source_id","abank-cashback-rules").eq("candidate_type","official_source_conflict")
+        .eq("source_id","abank-cashback-rules").eq("candidate_type","official_overview_mismatch")
         .eq("new_hash",conflictHash).limit(1);
       if(!existing?.length){
         const {data:created,error}=await service.from("scanner_candidates").insert({
-          run_id:run.id,source_id:"abank-cashback-rules",bank:"àбанк",candidate_type:"official_source_conflict",
-          priority:"high",source_role:"primary",old_hash:null,new_hash:conflictHash,affected_cells:[],
-          excerpt:"Official A-Bank cashback page and program rules contain conflicting program conditions.",
+          run_id:run.id,source_id:"abank-cashback-rules",bank:"àбанк",candidate_type:"official_overview_mismatch",
+          priority:"normal",source_role:"primary",old_hash:null,new_hash:conflictHash,affected_cells:[],
+          excerpt:"A-Bank marketing overview differs from the official program rules; rule values remain authoritative.",
           parser_version:PARSER_VERSION,structured_payload:{...rules,source_consistency_review:review},status:"pending"
         }).select("id").single();
         if(!error&&created)candidates++;
       }
     } else {
       await service.from("scanner_candidates").update({
-        status:"reviewed",review_note:"Автоматично закрито: офіційні сторінки А-Банку знову узгоджені.",
+        status:"reviewed",review_note:"Автоматично закрито: маркетингова сторінка А-Банку і правила програми знову узгоджені.",
         reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()
-      }).eq("source_id","abank-cashback-rules").eq("candidate_type","official_source_conflict").eq("status","pending");
+      }).eq("source_id","abank-cashback-rules").eq("candidate_type","official_overview_mismatch").eq("status","pending");
     }
   } catch (_) {}
 
