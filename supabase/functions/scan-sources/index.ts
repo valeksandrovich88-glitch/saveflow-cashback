@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 58;
+const PARSER_VERSION = 59;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -738,28 +738,39 @@ function normalizeMonobankRulesStructured(text,structured) {
 
 function normalizeRaifCashbackStructured(text,structured) {
   const raw=String(text||"");
-  const select=raw.match(/(?:Кешбек\s*)?2-?ві?\s+категор\p{L}*\s+на\s+вибір/iu)
-    || raw.match(/Виберіть\s+(\d+)\s+категор\p{L}*\s+від\s+банку\s+на\s+поточн\p{L}*\s+місяц/iu);
+  const select=raw.match(/Виберіть\s+(\d+)\s+категор\p{L}*\s+від\s+банку\s+на\s+поточн\p{L}*\s+місяц/iu);
   const cap=raw.match(/кешбек\p{L}*\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
-  const okko=/Fishback\s+від\s+Райфу/iu.test(raw) ? {
-    partner:"ОККО",
-    personalized_offer_required:/персональн\p{L}*\s+пропозиці\p{L}*\s+на\s+ОККО/iu.test(raw),
-    pulls_uah_per_litre:2,
-    fuel_uah_per_litre:1,
-    other_goods_percent:5,
-    evidence:"Додатковий Fishback від Райфу до персональної пропозиції на ОККО: 2 грн/л Pulls 95/Pulls Diesel, 1 грн/л бензин/ДП, 5% інші товари."
-  } : null;
+  const maxCash=raw.match(/Максимальн\p{L}*\s+розмір\s+Кешбек\p{L}*[\s\S]{0,90}?становить\s+(\d[\d\s]*)\s*грн/iu);
+  const minWithdraw=raw.match(/не\s+менше\s+(\d[\d\s]*)\s*\(?ста\)?\s*Кешбек/iu)
+    || raw.match(/не\s+менше\s+(\d[\d\s]*)\s*Кешбек/iu);
+  const validFromText=raw.match(/редакці\p{L}*\s+Правил\s+вводиться\s+в\s+дію\s+з\s+(\d{1,2})\.(\d{1,2})\.(20\d{2})/iu);
+  const validFrom=validFromText
+    ? `${validFromText[3]}-${String(validFromText[2]).padStart(2,"0")}-${String(validFromText[1]).padStart(2,"0")}`
+    : null;
+  const personalized=/Кількість\s+персональн\p{L}*[^.]{0,160}?визначається\s+Банк/iu.test(raw)
+    || /персональн\p{L}*\s*\(доступн\p{L}*\)\s+Учаснику\s+Категор/iu.test(raw);
   return {
     ...structured,
     items:[],
     item_count:0,
     rates_percent:[],
-    selection:{cadence:"monthly",max_categories:select&&select[1]?Number(select[1]):2},
-    max_bank_rate_cap_percent:cap?parseRateNumber(cap[1]):20,
+    selection:{
+      cadence:"monthly",
+      max_categories:select?Number(select[1]):null,
+      personalized_count:personalized
+    },
+    limits:{
+      ...(structured?.limits||{}),
+      max_cashback_uah:maxCash?Number(String(maxCash[1]).replace(/\s+/g,"")):500,
+      min_withdrawal_uah:minWithdraw?Number(String(minWithdraw[1]).replace(/\s+/g,"")):100
+    },
+    max_bank_rate_cap_percent:cap?parseRateNumber(cap[1]):null,
     exact_current_category_rates_public:false,
+    exact_current_category_list_public:false,
     current_rates_location:"MyRaif",
     personalized_category_set:true,
-    special_offer_signals:okko?[okko]:[],
+    rules_valid_from:validFrom,
+    rules_text_extracted:true,
     confidence:"rules_only"
   };
 }
@@ -1773,6 +1784,36 @@ async function loadMonobankRulesPdfSource(sourceUrl:string) {
   };
 }
 
+async function loadRaifRulesPdfSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://raiffeisen.ua/",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(30000)});
+  if(!res.ok) throw new Error("Raif cashback rules PDF HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const binaryHash=await sha256Bytes(bytes);
+  const parsed=await pdf(Buffer.from(bytes));
+  const raw=String(parsed.text||"").replace(/\r/g,"\n");
+  if(raw.length<5000 || !/Програма\s+заохочень\s+[«"]?Ще/iu.test(raw) || !/Максимальн\p{L}*\s+розмір\s+Кешбек/iu.test(raw)){
+    throw new Error("Raif cashback rules PDF text extraction failed");
+  }
+  return {
+    status:res.status,
+    raw,
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:String(res.headers.get("content-type")||"application/pdf"),
+    binaryHash,
+    transport:"raif_pdf_text",
+    resolvedUrl:sourceUrl
+  };
+}
+
 async function loadTascomVerycardSource(sourceUrl:string) {
   const headers={
     "User-Agent":BROWSER_UA,
@@ -1957,6 +1998,9 @@ async function loadSource(source: any) {
     }
     if (source.id === "monobank-cashback-rules") {
       return await loadMonobankRulesPdfSource(source.url);
+    }
+    if (source.id === "raif-cashback") {
+      return await loadRaifRulesPdfSource(source.url);
     }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
