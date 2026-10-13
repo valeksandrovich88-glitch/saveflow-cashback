@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 60;
+const PARSER_VERSION = 61;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -733,6 +733,51 @@ function normalizeMonobankRulesStructured(text,structured) {
     partner_definition_mode:"merchant",
     current_category_rates_change_monthly:true,
     confidence:"rules_only"
+  };
+}
+
+function normalizeOschadVisaSubscriptionsStructured(text,structured) {
+  const raw=String(text||"");
+  const infinite=raw.match(/40\s*%[^\n]{0,100}?Visa\s+Infinite/iu)
+    || raw.match(/Visa\s+Infinite[^\n]{0,100}?40\s*%/iu);
+  const platinum=raw.match(/20\s*%[^\n]{0,100}?Visa\s+Platinum/iu)
+    || raw.match(/Visa\s+Platinum[^\n]{0,100}?20\s*%/iu);
+  const limit=raw.match(/Максимальн\p{L}*\s+сума\s+бонус\p{L}*[^\d]{0,100}?(\d[\d\s]*)\s*грив/iu);
+  const period=raw.match(/з\s+(\d{1,2})\.(\d{1,2})\.(\d{2,4})\s+по\s+(\d{1,2})\.(\d{1,2})\.(\d{2,4})/iu);
+  const iso=(d,m,y)=>{
+    const yy=Number(y)<100?2000+Number(y):Number(y);
+    return `${yy}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  };
+  const validFrom=period?iso(period[1],period[2],period[3]):null;
+  const validTo=period?iso(period[4],period[5],period[6]):null;
+  const services=["Apple","Steam","YouTube","Google Storage","Netflix","PlayStation","Microsoft","Spotify","ChatGPT"]
+    .filter(x=>raw.toLocaleLowerCase("uk-UA").includes(x.toLocaleLowerCase("uk-UA")));
+  const conditions=[
+    services.length?`Онлайн-підписки: ${services.join(", ")}`:null,
+    limit?`Максимум ${Number(String(limit[1]).replace(/\s+/g,""))} грн бонусами за календарний місяць`:null
+  ].filter(Boolean);
+  const items=[];
+  if(infinite)items.push({
+    kind:"promo",name:"Онлайн-підписки · Visa Infinite",partner:"Ощадбанк · Мої бонуси",category:"Онлайн-підписки",
+    rate_percent:40,rate_text:"40%",current_value:"40%",valid_from:validFrom,valid_to:validTo,
+    evidence:[compactLabel(infinite[0])],conditions
+  });
+  if(platinum)items.push({
+    kind:"promo",name:"Онлайн-підписки · Visa Platinum",partner:"Ощадбанк · Мої бонуси",category:"Онлайн-підписки",
+    rate_percent:20,rate_text:"20%",current_value:"20%",valid_from:validFrom,valid_to:validTo,
+    evidence:[compactLabel(platinum[0])],conditions
+  });
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:[...new Set(items.map(x=>x.rate_percent))].sort((a,b)=>b-a),
+    limits:{...(structured?.limits||{}),max_bonus_uah:limit?Number(String(limit[1]).replace(/\s+/g,"")):500},
+    valid_from:validFrom||structured?.valid_from||null,
+    valid_to:validTo||structured?.valid_to||null,
+    eligible_services:services,
+    exact_offer_public:items.length===2,
+    confidence:items.length===2?"review_ready":(structured?.confidence||"signal_only")
   };
 }
 
@@ -2058,6 +2103,7 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
         if(source.id==="monobank-cashback-rules") structured=normalizeMonobankRulesStructured(text,structured);
         if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
