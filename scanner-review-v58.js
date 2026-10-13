@@ -115,6 +115,7 @@
     if(c.candidate_type==='official_source_expired') return 'Офіційна пропозиція завершилася';
     if(c.candidate_type==='official_source_unreadable') return 'Офіційне джерело недоступне сканеру';
     if(c.candidate_type==='reference_without_official_source') return 'Немає офіційного джерела для перевірки';
+    if(c.candidate_type==='reference_without_official_evidence') return 'Немає офіційного підтвердження ставки';
     if(c.candidate_type==='official_monthly_source_stale') return 'Місячна сторінка не оновлена';
     if(c.candidate_type==='official_monthly_source_inconsistent') return 'Місячна сторінка містить суперечливі періоди';
     if(c.candidate_type==='partner_roster_changed') return 'Змінився список партнерів';
@@ -322,6 +323,7 @@
           ${expiry.expired_on?`<div class="sf-evidence">Строк дії завершився <b>${esc(fmtShort(expiry.expired_on))}</b>. Сканер лише створив задачу на перевірку; автоматичного видалення немає.</div>`:''}
           ${c.candidate_type==='official_source_unreadable'?`<div class="sf-evidence"><b>Чому не читається:</b> ${esc(healthReason(health.reason||p.reason))}${health.response_bytes!=null?` · відповідь ${esc(health.response_bytes)} байт`:''}${health.transport?` · ${esc(health.transport)}`:''}. Дані з такого джерела не застосовуються автоматично.</div>`:''}
           ${c.candidate_type==='reference_without_official_source'?`<div class="sf-evidence"><b>Проблема покриття:</b> у матриці є ${esc(coverageGap.affected_count??affected.length)} комірок з довідкових джерел, але для цього банку не підключено первинне офіційне джерело. Ці значення не повинні вважатися підтвердженими банком.</div>`:''}
+          ${c.candidate_type==='reference_without_official_evidence'?`<div class="sf-evidence"><b>Проблема підтвердження:</b> ${coverageGap.reason==='no_enabled_primary_official_source'?'первинного офіційного джерела немає':'офіційне джерело підключене, але воно не підтверджує ці конкретні категорії/ставки'} · непідтверджено ${esc(coverageGap.affected_count??affected.length)} з ${esc(coverageGap.total_reference_count??affected.length)} reference-комірок. Такі ставки не слід вважати офіційно перевіреними.</div>`:''}
           ${(c.candidate_type==='official_monthly_source_stale'||c.candidate_type==='official_monthly_source_inconsistent')?`<div class="sf-evidence"><b>Поточний період:</b> ${esc(monthly.current_period||'—')} · <b>на сторінці:</b> ${esc((monthly.detected_periods||[]).join(', ')||'—')}<br>${(monthly.evidence||[]).map(esc).join('<br>')}<br>Такі дані не застосовуються автоматично, доки офіційна сторінка не буде узгоджена з поточним місяцем.</div>`:''}
           ${c.candidate_type==='partner_roster_changed'?`<div class="sf-partner-audit">
             <div class="sf-partner-audit-summary">
