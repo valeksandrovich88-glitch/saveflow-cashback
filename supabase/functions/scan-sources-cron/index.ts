@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 52;
+const PARSER_VERSION = 53;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -695,6 +695,34 @@ function parseIzibankPublicPartnerRefs(rawHtml) {
     if(ref&&!seen.has(ref)){seen.add(ref);out.push(ref);}
   }
   return out;
+}
+
+function normalizeRaifCashbackStructured(text,structured) {
+  const raw=String(text||"");
+  const select=raw.match(/(?:Кешбек\s*)?2-?ві?\s+категор\p{L}*\s+на\s+вибір/iu)
+    || raw.match(/Виберіть\s+(\d+)\s+категор\p{L}*\s+від\s+банку\s+на\s+поточн\p{L}*\s+місяц/iu);
+  const cap=raw.match(/кешбек\p{L}*\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const okko=/Fishback\s+від\s+Райфу/iu.test(raw) ? {
+    partner:"ОККО",
+    personalized_offer_required:/персональн\p{L}*\s+пропозиці\p{L}*\s+на\s+ОККО/iu.test(raw),
+    pulls_uah_per_litre:2,
+    fuel_uah_per_litre:1,
+    other_goods_percent:5,
+    evidence:"Додатковий Fishback від Райфу до персональної пропозиції на ОККО: 2 грн/л Pulls 95/Pulls Diesel, 1 грн/л бензин/ДП, 5% інші товари."
+  } : null;
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    selection:{cadence:"monthly",max_categories:select&&select[1]?Number(select[1]):2},
+    max_bank_rate_cap_percent:cap?parseRateNumber(cap[1]):20,
+    exact_current_category_rates_public:false,
+    current_rates_location:"MyRaif",
+    personalized_category_set:true,
+    special_offer_signals:okko?[okko]:[],
+    confidence:"rules_only"
+  };
 }
 
 function normalizeIzibankCashbackStructured(text,structured) {
@@ -1764,6 +1792,7 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
         if(source.id==="izibank-market") structured=normalizeIzibankMarketStructured(raw,text,structured);
         if(source.id==="izibank-cashback-rules") structured=normalizeIzibankRulesStructured(text,structured);
@@ -1776,7 +1805,7 @@ async function loadSource(source: any) {
         hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
-      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules"].includes(source.id)){
+      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules","raif-cashback"].includes(source.id)){
         const limits={...(structured.limits||{})};
         const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
         structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
