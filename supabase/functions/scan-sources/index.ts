@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 48;
+const PARSER_VERSION = 49;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1422,6 +1422,25 @@ async function loadMastercardSubscriptionSource() {
 }
 
 
+async function fetchSenseHtml(url:string,headers:Record<string,string>) {
+  let directStatus=0;
+  try{
+    const res=await fetch(url,{redirect:"follow",headers,signal:AbortSignal.timeout(15000)});
+    directStatus=res.status;
+    if(res.ok){
+      const raw=await res.text();
+      return {status:res.status,raw,contentType:String(res.headers.get("content-type")||"text/html"),transport:"edge_fetch"};
+    }
+  }catch(_){}
+  const {data,error}=await service.rpc("scanner_fetch_sense_url",{p_url:url});
+  const row=Array.isArray(data)?data[0]:data;
+  if(!error&&row&&Number(row.status)>=200&&Number(row.status)<300){
+    return {status:Number(row.status),raw:String(row.content||""),contentType:String(row.content_type||"text/html"),transport:"db_http_sense_fallback"};
+  }
+  const fallback=row?Number(row.status):0;
+  throw new Error("Sense HTTP "+(directStatus||fallback||"failed"));
+}
+
 async function loadSenseMonthlyPartnersSource() {
   const root = "https://sensebank.ua";
   const headers = {
@@ -1431,33 +1450,35 @@ async function loadSenseMonthlyPartnersSource() {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
   };
-  const hubRes = await fetch(root + "/cash-u", { redirect:"follow", headers, signal:AbortSignal.timeout(15000) });
-  if (!hubRes.ok) throw new Error("Sense Cash'u hub HTTP " + hubRes.status);
-  const hubHtml = await hubRes.text();
-  const monthName = SENSE_MONTH_NAMES[new Date().getUTCMonth()];
-  let articleUrl = "";
-  for (const m of hubHtml.matchAll(/<a\b[^>]*href=["']([^"']*\/cash-u-news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)) {
-    const label = cleanText(m[2]).toLocaleLowerCase("uk-UA");
-    if (label.includes(monthName) && /cash.?u\s*club/iu.test(label)) {
-      articleUrl = new URL(m[1], root).toString();
+  const hub=await fetchSenseHtml(root+"/cash-u",headers);
+  const hubHtml=hub.raw;
+  const monthName=SENSE_MONTH_NAMES[new Date().getUTCMonth()];
+  let articleUrl="";
+  for(const m of hubHtml.matchAll(/<a\b[^>]*href=["']([^"']*\/cash-u-news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)){
+    const label=cleanText(m[2]).toLocaleLowerCase("uk-UA");
+    if(label.includes(monthName)&&/cash.?u\s*club/iu.test(label)){
+      articleUrl=new URL(m[1],root).toString();
       break;
     }
   }
-  if (!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
-  const articleRes = await fetch(articleUrl, { redirect:"follow", headers, signal:AbortSignal.timeout(15000) });
-  if (!articleRes.ok) throw new Error("Sense monthly article HTTP " + articleRes.status);
-  const articleHtml = await articleRes.text();
-  if (!/Спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер/iu.test(cleanText(articleHtml))) {
+  if(!articleUrl){
+    const slugMatch=hubHtml.match(new RegExp('href=["\\']([^"\\']*\\/cash-u-news\\/[^"\\']*'+monthName+'[^"\\']*)["\\']','iu'));
+    if(slugMatch) articleUrl=new URL(slugMatch[1],root).toString();
+  }
+  if(!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
+  const article=await fetchSenseHtml(articleUrl,headers);
+  const articleHtml=article.raw;
+  if(!/Спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер/iu.test(cleanText(articleHtml))){
     throw new Error("Sense monthly partner section not found");
   }
   return {
-    status: articleRes.status,
-    raw: articleHtml,
-    responseBytes: new TextEncoder().encode(articleHtml).byteLength,
-    documentType: "html",
-    contentType: String(articleRes.headers.get("content-type") || "text/html"),
-    transport: "sense_monthly_article",
-    resolvedUrl: articleUrl,
+    status:article.status,
+    raw:articleHtml,
+    responseBytes:new TextEncoder().encode(articleHtml).byteLength,
+    documentType:"html",
+    contentType:article.contentType,
+    transport:article.transport==="edge_fetch"?"sense_monthly_article":"sense_monthly_article_db_fallback",
+    resolvedUrl:articleUrl,
   };
 }
 
