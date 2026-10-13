@@ -2,7 +2,10 @@
   const RULES={
     'А-Банк':new Set(['Квіти','Кіно та театри','Книги та канцтовари','Краса','Тварини']),
     'àбанк':new Set(['Квіти','Кіно та театри','Книги та канцтовари','Краса','Тварини']),
-    'izibank':new Set(['АЗС',"Аптеки / здоров'я",'Дитячі товари','Дім та ремонт','Кафе та ресторани','Одяг та взуття','Продукти','Спорт та фітнес','Таксі','Усі покупки'])
+    'izibank':new Set(['АЗС',"Аптеки / здоров'я",'Дім та ремонт','Кафе та ресторани','Одяг та взуття','Продукти','Спорт та фітнес','Таксі','Усі покупки'])
+  };
+  const UNVERIFIED={
+    'izibank':new Set(['Дитячі товари'])
   };
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
 
@@ -12,6 +15,9 @@
     .cash.sf-official-dynamic{background:rgba(235,243,236,.66)!important;color:#425549!important}
     .cash.sf-official-dynamic .cash-value{font-size:10px!important;font-weight:800!important;line-height:1.15!important;white-space:nowrap!important}
     .cash.sf-official-dynamic::after{content:'динамічно';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.02em;color:#718077;text-transform:uppercase}
+    .cash.sf-official-unverified{background:rgba(245,247,245,.72)!important;color:#8a938d!important}
+    .cash.sf-official-unverified .cash-value{font-size:12px!important;font-weight:800!important;line-height:1.15!important}
+    .cash.sf-official-unverified::after{content:'немає офіц. даних';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.01em;color:#929a95;text-transform:uppercase}
   `;
   document.head.appendChild(st);
 
@@ -42,6 +48,30 @@
     value.textContent='у застосунку';
     cash.title='Категорія підтверджена офіційним джерелом. Поточна ставка є динамічною та відображається у застосунку банку.';
     td.dataset.sfOfficialDynamic='1';
+    td.dataset.sfOfficialUnverified='';
+    return true;
+  }
+  function patchUnverifiedCell(td){
+    if(!td)return false;
+    let cash=td.querySelector('.cash');
+    if(!cash){
+      cash=document.createElement('div');
+      cash.className='cash';
+      td.innerHTML='';
+      td.appendChild(cash);
+    }
+    cash.classList.remove('best','sf-official-dynamic');
+    cash.classList.add('sf-official-unverified');
+    let value=cash.querySelector('.cash-value');
+    if(!value){
+      value=document.createElement('span');
+      value.className='cash-value';
+      cash.replaceChildren(value);
+    }
+    value.textContent='—';
+    cash.title='У підключених офіційних правилах izibank ця категорія не підтверджена. Reference-ставка не показується.';
+    td.dataset.sfOfficialDynamic='';
+    td.dataset.sfOfficialUnverified='1';
     return true;
   }
   function recalcBest(row){
@@ -51,7 +81,7 @@
       const cash=td.querySelector('.cash');
       if(!cash)return;
       cash.classList.remove('best');
-      if(td.dataset.sfOfficialDynamic==='1')return;
+      if(td.dataset.sfOfficialDynamic==='1'||td.dataset.sfOfficialUnverified==='1')return;
       const text=norm(cash.querySelector('.cash-value')?.textContent||cash.textContent||'');
       const nums=[...text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)].map(m=>Number(m[1].replace(',','.'))).filter(Number.isFinite);
       if(nums.length)numeric.push([cash,Math.max(...nums)]);
@@ -77,6 +107,7 @@
       let changed=false;
       for(const [idx,bank] of bankCols){
         if(RULES[bank]?.has(cat)) changed=patchCell(cells[idx])||changed;
+        else if(UNVERIFIED[bank]?.has(cat)) changed=patchUnverifiedCell(cells[idx])||changed;
       }
       if(changed)recalcBest(tr);
     });
