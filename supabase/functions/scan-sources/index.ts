@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 55;
+const PARSER_VERSION = 56;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1249,6 +1249,9 @@ function hasExactOfficialEvidence(cell, structured) {
   const aliases=evidenceAliases(cell?.category||"");
   const items=Array.isArray(structured?.items)?structured.items:[];
   return items.some((item)=>{
+    // Partner cashback is a merchant-specific offer and must never validate
+    // a generic category cell in the main bank matrix.
+    if(item?.kind==="partner") return false;
     const t=evidenceNorm([item?.category,item?.name,...(Array.isArray(item?.evidence)?item.evidence:[])].filter(Boolean).join(" "));
     const categoryHit=aliases.some((a)=>a&&t.includes(evidenceNorm(a)));
     if(!categoryHit) return false;
@@ -1263,6 +1266,7 @@ function filterAffectedByEvidence(affected, structured) {
   return (affected||[]).filter(cell=>{
     const aliases=evidenceAliases(cell?.category||"");
     const itemHit=items.some(item=>{
+      if(item?.kind==="partner") return false;
       const t=evidenceNorm([item?.category,item?.name,...(Array.isArray(item?.evidence)?item.evidence:[])].filter(Boolean).join(" "));
       return aliases.some(a=>a&&t.includes(evidenceNorm(a)));
     });
