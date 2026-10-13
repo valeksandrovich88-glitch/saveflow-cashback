@@ -1,6 +1,9 @@
 (()=>{
   const FIXES=[
-    {bank:'ТАСКОМБАНК',category:'Комунальні послуги',html:'до 0,5% <span class="slash">/</span> до 3%'}
+    {bank:'ТАСКОМБАНК',category:'АЗС',html:'до 0,5% <span class="slash">/</span> до 3%'},
+    {bank:'ТАСКОМБАНК',category:"Аптеки / здоров'я",html:'до 0,5% <span class="slash">/</span> до 3%'},
+    {bank:'ТАСКОМБАНК',category:'Комунальні послуги',html:'до 0,5% <span class="slash">/</span> до 3%'},
+    {bank:'ТАСКОМБАНК',category:'Продукти',html:'до 0,5% <span class="slash">/</span> до 3%'}
   ];
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
   function numberFrom(el){
