@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 47;
+const PARSER_VERSION = 48;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -743,7 +743,7 @@ function ideaCashbackCategoryFromContext(context) {
   if(/одяг|взут/iu.test(x)) return "Одяг та взуття";
   if(/технік/iu.test(x)) return "Техніка";
   if(/кафе|ресторан/iu.test(x)) return "Кафе та ресторани";
-  if(/\bазс\b/iu.test(x)) return "АЗС";
+  if(/азс/iu.test(x)) return "АЗС";
   if(/продукт|супермаркет/iu.test(x)) return "Продукти";
   return null;
 }
@@ -1636,7 +1636,7 @@ async function loadSource(source: any) {
         const prev=pendingEvidence[0].structured_payload||{};
         const refreshedPayload={...structured,...(prev.bootstrap_review?{bootstrap_review:prev.bootstrap_review}:{})};
         const {data:currentRefs}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
-        const comparableAffected=filterAffectedByEvidence(currentRefs||[],structured);
+        const comparableAffected=(currentRefs||[]).filter((cell:any)=>hasExactOfficialEvidence(cell,structured));
         const updatePayload=comparableAffected.length
           ? {excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,affected_cells:comparableAffected,updated_at:new Date().toISOString()}
           : {excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:refreshedPayload,affected_cells:[],status:"rejected",review_note:"Автоматично закрито: поточне офіційне джерело не містить зіставного підтвердження для reference-комірок.",reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()};
@@ -1676,7 +1676,7 @@ async function loadSource(source: any) {
         } else if (source.bank) {
           const matrixEvidenceProfile=["cashback","categories","rules"].includes(String(source.parser_profile||""));
           const hasComparableEvidence=Number(structured.item_count||0)>0||(Array.isArray(structured.category_pool)&&structured.category_pool.length>0);
-          if (matrixEvidenceProfile&&hasComparableEvidence) { const {data}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference"); affected=filterAffectedByEvidence(data||[],structured); }
+          if (matrixEvidenceProfile&&hasComparableEvidence) { const {data}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference"); affected=(data||[]).filter((cell:any)=>hasExactOfficialEvidence(cell,structured)); }
           if (matrixEvidenceProfile&&hasComparableEvidence&&affected.length) { type="reference_to_official_review"; priority="high"; }
           else if (source.data_mode==="dynamic"||source.data_mode==="personalized"||source.publish_policy==="manual_only") { type="dynamic_or_personalized_source_changed"; priority="high"; }
         }
@@ -1693,7 +1693,7 @@ async function loadSource(source: any) {
       }
       if (!candidate && isInitial && source.source_role==="primary" && source.bank && ["cashback","categories","rules"].includes(String(source.parser_profile||"")) && !structured.unsupported && safeFocused.trim().length>=80 && (Number(structured.item_count||0)>0 || (Array.isArray(structured.category_pool)&&structured.category_pool.length>0))) {
         const {data:affected}=await service.from("scanner_matrix_index").select("cell_key,bank,category,current_value,source_tier,source_url").eq("bank",source.bank).eq("source_tier","reference");
-        const comparableAffected=filterAffectedByEvidence(affected||[],structured);
+        const comparableAffected=(affected||[]).filter((cell:any)=>hasExactOfficialEvidence(cell,structured));
         if (comparableAffected.length) {
           const affected=comparableAffected;
           const {data:existingBootstrap}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","reference_to_official_review").eq("new_hash",hash).limit(1);
