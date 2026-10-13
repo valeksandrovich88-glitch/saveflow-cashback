@@ -118,6 +118,7 @@
     if(c.candidate_type==='reference_without_official_evidence') return 'Немає офіційного підтвердження ставки';
     if(c.candidate_type==='official_monthly_source_stale') return 'Місячна сторінка не оновлена';
     if(c.candidate_type==='official_monthly_source_inconsistent') return 'Місячна сторінка містить суперечливі періоди';
+    if(c.candidate_type==='official_source_conflict') return 'Офіційні джерела суперечать одне одному';
     if(c.candidate_type==='partner_roster_changed') return 'Змінився список партнерів';
     if(c.candidate_type==='dynamic_or_personalized_source_changed') return 'Зміни у персоналізованому джерелі';
     if(c.candidate_type==='reference_to_official_review') return 'Є офіційне джерело для перевірки';
@@ -273,6 +274,7 @@
     const review=p.review_policy||{};
     const expiry=p.expiry_review||{};
     const monthly=p.monthly_source_review||{};
+    const consistency=p.source_consistency_review||{};
     const coverageGap=p.coverage_gap||{};
     const health=p.source_health||{};
     const partnerAudit=p.partner_audit||{};
@@ -312,6 +314,7 @@
             ${c.candidate_type==='official_source_unreadable'?'<span class="sf-chip unavailable">source unavailable</span>':''}
             ${c.candidate_type==='official_monthly_source_stale'?'<span class="sf-chip expired">stale month</span>':''}
             ${c.candidate_type==='official_monthly_source_inconsistent'?'<span class="sf-chip unavailable">month conflict</span>':''}
+            ${c.candidate_type==='official_source_conflict'?'<span class="sf-chip unavailable">source conflict</span>':''}
             ${reference?'<span class="sf-chip reference">reference only</span>':''}
           </div>
         </div>
@@ -327,6 +330,7 @@
           ${c.candidate_type==='reference_without_official_source'?`<div class="sf-evidence"><b>Проблема покриття:</b> у матриці є ${esc(coverageGap.affected_count??affected.length)} комірок з довідкових джерел, але для цього банку не підключено первинне офіційне джерело. Ці значення не повинні вважатися підтвердженими банком.</div>`:''}
           ${c.candidate_type==='reference_without_official_evidence'?`<div class="sf-evidence"><b>Проблема підтвердження:</b> ${coverageGap.reason==='no_enabled_primary_official_source'?'первинного офіційного джерела немає':'офіційне джерело підключене, але воно не підтверджує ці конкретні категорії/ставки'} · непідтверджено ${esc(coverageGap.affected_count??affected.length)} з ${esc(coverageGap.total_reference_count??affected.length)} reference-комірок. Такі ставки не слід вважати офіційно перевіреними.</div>`:''}
           ${(c.candidate_type==='official_monthly_source_stale'||c.candidate_type==='official_monthly_source_inconsistent')?`<div class="sf-evidence"><b>Поточний період:</b> ${esc(monthly.current_period||'—')} · <b>на сторінці:</b> ${esc((monthly.detected_periods||[]).join(', ')||'—')}<br>${(monthly.evidence||[]).map(esc).join('<br>')}<br>Такі дані не застосовуються автоматично, доки офіційна сторінка не буде узгоджена з поточним місяцем.</div>`:''}
+          ${c.candidate_type==='official_source_conflict'?`<div class="sf-evidence"><b>Конфлікт офіційних джерел:</b><br>${consistency.main_page_market_cap_percent!=null?`Основна сторінка izibank: до <b>${esc(consistency.main_page_market_cap_percent)}%</b><br>`:''}${consistency.market_page_cap_percent!=null?`Сторінка кешбек-маркету: до <b>${esc(consistency.market_page_cap_percent)}%</b><br>`:''}${consistency.market_limit_claims?.no_maximum_claim?'На сторінці також є фраза «без обмежень на максимальну суму кешбеку».<br>':''}${consistency.market_limit_claims?.monthly_amount_uah!=null?`Одночасно вказано «до <b>${esc(consistency.market_limit_claims.monthly_amount_uah)} грн</b> кешбеку щомісяця».<br>`:''}${(consistency.reasons||[]).map(x=>esc(x)).join('<br>')}<br>SaveFlow не підставляє жодне з цих значень як точну ставку магазину — потрібна ручна перевірка офіційних сторінок.</div>`:''}
           ${c.candidate_type==='partner_roster_changed'?`<div class="sf-partner-audit">
             <div class="sf-partner-audit-summary">
               <span>Офіційно: <b>${esc(partnerAudit.official_count??'—')}</b></span>
