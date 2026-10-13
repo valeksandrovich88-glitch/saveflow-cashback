@@ -5,7 +5,8 @@
     'izibank':new Set(['АЗС',"Аптеки / здоров'я",'Дім та ремонт','Кафе та ресторани','Одяг та взуття','Продукти','Спорт та фітнес','Таксі','Усі покупки'])
   };
   const UNVERIFIED={
-    'izibank':new Set(['Дитячі товари'])
+    'izibank':new Set(['Дитячі товари']),
+    'ТАСКОМБАНК':new Set(['Краса','Одяг та взуття','Усі покупки'])
   };
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
 
@@ -51,7 +52,7 @@
     td.dataset.sfOfficialUnverified='';
     return true;
   }
-  function patchUnverifiedCell(td){
+  function patchUnverifiedCell(td,bank){
     if(!td)return false;
     let cash=td.querySelector('.cash');
     if(!cash){
@@ -69,7 +70,7 @@
       cash.replaceChildren(value);
     }
     value.textContent='—';
-    cash.title='У підключених офіційних правилах izibank ця категорія не підтверджена. Reference-ставка не показується.';
+    cash.title=`У поточному офіційному джерелі ${bank||'банку'} ця категорія не підтверджена. Стара ставка не показується.`;
     td.dataset.sfOfficialDynamic='';
     td.dataset.sfOfficialUnverified='1';
     return true;
@@ -97,7 +98,7 @@
     const bankCols=new Map();
     heads.forEach((th,i)=>{
       const name=bankNameFromHead(th);
-      if(RULES[name])bankCols.set(i,name);
+      if(RULES[name]||UNVERIFIED[name])bankCols.set(i,name);
     });
     if(!bankCols.size)return;
     [...table.querySelectorAll('tbody tr')].forEach(tr=>{
@@ -107,7 +108,7 @@
       let changed=false;
       for(const [idx,bank] of bankCols){
         if(RULES[bank]?.has(cat)) changed=patchCell(cells[idx])||changed;
-        else if(UNVERIFIED[bank]?.has(cat)) changed=patchUnverifiedCell(cells[idx])||changed;
+        else if(UNVERIFIED[bank]?.has(cat)) changed=patchUnverifiedCell(cells[idx],bank)||changed;
       }
       if(changed)recalcBest(tr);
     });
