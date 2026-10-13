@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 49;
+const PARSER_VERSION = 50;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -673,6 +673,55 @@ function bisbankCategoryName(name) {
   const x=compactLabel(name);
   if(/^АЗС\s+та\s+електрозарядки$/iu.test(x)) return "АЗС";
   return x;
+}
+
+function normalizeAbankCashbackLandingStructured(rawHtml,text,structured) {
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    category_pool:[],
+    limits:{},
+    selection:{cadence:"monthly",max_categories:2},
+    exact_current_rates_public:false,
+    redirects_to_partner_onboarding:true,
+    current_rates_location:"àbank24 / current customer cashback offers",
+    evidence_note:"The public /services/cashback route is implemented as a redirect to /services/become-partner and must not be used as exact monthly customer cashback evidence.",
+    confidence:"signal_only"
+  };
+}
+
+function normalizeAbankCashbackRulesStructured(text,structured) {
+  const categoryPool=[
+    "Краса","Медицина","Продукти та супермаркети","Авто та АЗС","Одяг та взуття",
+    "Мандри","Розваги та спорт","Кафе та ресторани","Кіно","Таксі",
+    "Тварини","Книги","Відеоігри","Квіти","Фастфуд"
+  ];
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    category_pool:categoryPool,
+    category_pool_source:"official_program_rules",
+    selection:{
+      cadence:"monthly",
+      max_categories:2,
+      partner_categories:"available_to_choose_or_preselected"
+    },
+    limits:{
+      max_cashback_uah:500,
+      min_withdrawal_uah:100
+    },
+    tax_rate_percent:23,
+    visa_only_from:"2025-10-01",
+    valid_to:"2026-12-31",
+    exact_current_rates_public:false,
+    current_rates_location:"àbank24 / current bank offer",
+    rules_note:"Official rules define the category pool and program conditions, but do not provide reliable current-month percentages for each category.",
+    confidence:"rules_only"
+  };
 }
 
 function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
@@ -1592,6 +1641,8 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
+        if(source.id==="abank-cashback") structured=normalizeAbankCashbackLandingStructured(raw,text,structured);
+        if(source.id==="abank-cashback-rules") structured=normalizeAbankCashbackRulesStructured(text,structured);
         if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
         if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
@@ -1599,7 +1650,7 @@ async function loadSource(source: any) {
         hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
-      if(explicitMaxCashback!==null){
+      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules"].includes(source.id)){
         const limits={...(structured.limits||{})};
         const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
         structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
