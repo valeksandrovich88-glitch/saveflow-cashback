@@ -1,9 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
+import pdf from "npm:pdf-parse@1.1.1";
+import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 46;
+const PARSER_VERSION = 47;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -724,6 +726,54 @@ function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
   };
 }
 
+function ideaCashbackCategoryFromContext(context) {
+  const x=String(context||"").toLocaleLowerCase("uk-UA");
+  if(/таксі/iu.test(x)) return "Таксі";
+  if(/транспорт/iu.test(x)) return "Транспорт";
+  if(/краса|салон|космет/iu.test(x)) return "Краса";
+  if(/все\s+для\s+дому|мебл|будівниц/iu.test(x)) return "Дім та ремонт";
+  if(/аптек/iu.test(x)) return "Аптеки / здоров'я";
+  if(/маркетплейс/iu.test(x)) return "Маркетплейси";
+  if(/одяг|взут/iu.test(x)) return "Одяг та взуття";
+  if(/технік/iu.test(x)) return "Техніка";
+  if(/кафе|ресторан/iu.test(x)) return "Кафе та ресторани";
+  if(/\bазс\b/iu.test(x)) return "АЗС";
+  if(/продукт|супермаркет/iu.test(x)) return "Продукти";
+  return null;
+}
+
+function ideaDisplayPair(own,credit) {
+  const ownText=own===0?"—":fmtPct(own);
+  const creditText=credit===0?"—":fmtPct(credit);
+  if(ownText&&creditText) return ownText+" / "+creditText;
+  return ownText||creditText||null;
+}
+
+function normalizeIdeaCashbackPdfStructured(pdfItems, structured, resolvedUrl) {
+  const items=Array.isArray(pdfItems)?pdfItems:[];
+  const month=currentMonthWindow();
+  return {
+    ...structured,
+    source_url:resolvedUrl||structured?.source_url||null,
+    resolved_source_url:resolvedUrl||null,
+    items,
+    item_count:items.length,
+    rates_percent:uniqNumbers(items.flatMap((x)=>[x.own_rate_percent,x.credit_rate_percent]).filter((x)=>x!==null&&x!==undefined)),
+    category_pool:[...new Set(items.map((x)=>x.category).filter(Boolean))],
+    category_pool_source:"official_monthly_pdf",
+    valid_from:month.valid_from,
+    valid_to:month.valid_to,
+    selection:{...(structured?.selection||{}),cadence:"monthly",max_categories:2},
+    limits:{...(structured?.limits||{}),max_cashback_uah:500},
+    rate_document_url:resolvedUrl||null,
+    exact_rates_public_in_html:false,
+    exact_rates_in_official_pdf:true,
+    confidence:items.length>=3?"review_ready":"signal_only",
+    source_format:"pdf_text",
+    pdf_fingerprint_only:false
+  };
+}
+
 function normalizeIdeaCashbackStructured(rawHtml,text,structured) {
   const raw=String(rawHtml||"");
   const plain=String(text||"");
@@ -1388,12 +1438,106 @@ async function loadSenseMonthlyPartnersSource() {
   };
 }
 
+async function loadIdeaCashbackCategoriesPdfSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://ideabank.ua/uk/cashback",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(20000)});
+  if(!res.ok) throw new Error("Idea cashback PDF HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const binaryHash=await sha256Bytes(bytes);
+  const pages:any[]=[];
+  const pagerender=async(pageData:any)=>{
+    const tc=await pageData.getTextContent({normalizeWhitespace:false,disableCombineTextItems:false});
+    const items=(tc.items||[]).map((it:any)=>({
+      s:String(it.str||""),
+      x:Number(it.transform?.[4]||0),
+      y:Number(it.transform?.[5]||0),
+      w:Number(it.width||0),
+      h:Number(it.height||0)
+    }));
+    pages.push(items);
+    return items.map((x:any)=>x.s).join(" ");
+  };
+  const parsed=await pdf(Buffer.from(bytes),{pagerender});
+  const layout=(pages[0]||[]).filter((x:any)=>String(x.s||"").trim());
+  const now=new Date();
+  const monthNames=["січень","лютий","березень","квітень","травень","червень","липень","серпень","вересень","жовтень","листопад","грудень"];
+  const monthName=monthNames[now.getUTCMonth()];
+  const yy=String(now.getUTCFullYear()).slice(-2);
+  const header=layout.find((x:any)=>String(x.s||"").toLocaleLowerCase("uk-UA").includes(monthName)&&String(x.s||"").includes(yy));
+  if(!header) throw new Error("Idea cashback PDF current-month column not found");
+
+  const currentRates=layout.filter((x:any)=>{
+    const s=String(x.s||"").trim();
+    return /^\d{1,3}(?:[.,]\d+)?%\s*\/\s*\d{1,3}(?:[.,]\d+)?%$/u.test(s) && Math.abs(Number(x.x)-Number(header.x))<=28;
+  });
+  const out:any[]=[];
+  const seen=new Set<string>();
+  const month=currentMonthWindow();
+
+  for(const rate of currentRates){
+    const nearby=layout
+      .filter((x:any)=>Number(x.x)<240&&Math.abs(Number(x.y)-Number(rate.y))<=8)
+      .sort((a:any,b:any)=>Number(a.x)-Number(b.x))
+      .map((x:any)=>String(x.s||"").trim())
+      .filter(Boolean);
+    const context=nearby.join(" ");
+    const category=ideaCashbackCategoryFromContext(context);
+    if(!category||seen.has(category)) continue;
+    const m=String(rate.s||"").match(/(\d{1,3}(?:[.,]\d+)?)%\s*\/\s*(\d{1,3}(?:[.,]\d+)?)%/u);
+    if(!m) continue;
+    const own=parseRateNumber(m[1]),credit=parseRateNumber(m[2]);
+    if(own===null||credit===null) continue;
+    seen.add(category);
+    const shown=ideaDisplayPair(own,credit);
+    out.push({
+      kind:"category",
+      name:category,
+      category,
+      partner:null,
+      rate_percent:Math.max(own,credit),
+      rate_text:shown,
+      current_value:shown,
+      own_rate_percent:own,
+      credit_rate_percent:credit,
+      valid_from:month.valid_from,
+      valid_to:month.valid_to,
+      evidence:[(context+" · "+String(rate.s||"")).trim()],
+      conditions:[
+        "Щомісяця в O.Bank обираються дві категорії.",
+        "Кешбек нараховується за покупки кредитними коштами."
+      ]
+    });
+  }
+  if(out.length<3) throw new Error("Idea cashback PDF parsed too few current-month rates: "+out.length);
+  return {
+    status:res.status,
+    raw:String(parsed.text||""),
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:String(res.headers.get("content-type")||"application/pdf"),
+    binaryHash,
+    transport:"idea_pdf_text",
+    resolvedUrl:sourceUrl,
+    ideaPdfItems:out
+  };
+}
+
 async function loadSource(source: any) {
     if (source.id === "oschad-subscriptions-rules") {
       return await loadMastercardSubscriptionSource();
     }
     if (source.id === "sense-partners-monthly") {
       return await loadSenseMonthlyPartnersSource();
+    }
+    if (source.id === "idea-cashback-categories-pdf") {
+      return await loadIdeaCashbackCategoriesPdfSource(source.url);
     }
     let directError: unknown = null;
     let blockedDirect: { status: number; raw: string; responseBytes?: number; documentType?: string; contentType?: string; transport: string } | null = null;
@@ -1430,7 +1574,8 @@ async function loadSource(source: any) {
         if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
         if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
-        hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
+        if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
+        hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
       if(explicitMaxCashback!==null){
