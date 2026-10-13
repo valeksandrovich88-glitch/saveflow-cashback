@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 54;
+const PARSER_VERSION = 55;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -802,28 +802,45 @@ function normalizeIzibankRulesStructured(text,structured) {
 }
 
 function normalizeAbankCashbackLandingStructured(rawHtml,text,structured) {
+  const raw=String(text||"");
+  const rateCap=raw.match(/Кешбек\s+до\s+(\d{1,3}(?:[.,]\d+)?)\s*%\s+на\s+обран\p{L}*\s+категор/iu);
+  const maxCash=raw.match(/(\d[\d\s]*)\s*₴\s*Максимальн\p{L}*\s+сума\s+кешбек/iu);
+  const minWithdraw=raw.match(/(\d[\d\s]*)\s*₴\s*Мінімальн\p{L}*\s+сума\s+накопичен\p{L}*[\s\S]{0,80}?для\s+виведенн/iu);
+  const tax=raw.match(/податок\s+у\s+розмірі\s+(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const partnerUnlimited=/Необмежен\p{L}*\s+кількість\s+партнерськ\p{L}*\s+категор/iu.test(raw);
   return {
     ...structured,
     items:[],
     item_count:0,
     rates_percent:[],
     category_pool:[],
-    limits:{},
-    selection:{cadence:"monthly",max_categories:2},
+    limits:{
+      max_cashback_uah:maxCash?Number(String(maxCash[1]).replace(/\s+/g,"")):null,
+      min_withdrawal_uah:minWithdraw?Number(String(minWithdraw[1]).replace(/\s+/g,"")):null
+    },
+    selection:{cadence:"monthly",max_categories:2,partner_categories:partnerUnlimited?"unlimited_public_claim":null},
+    category_rate_cap_percent:rateCap?parseRateNumber(rateCap[1]):null,
+    tax_rate_percent:tax?parseRateNumber(tax[1]):null,
     exact_current_rates_public:false,
-    redirects_to_partner_onboarding:true,
     current_rates_location:"àbank24 / current customer cashback offers",
-    evidence_note:"The public /services/cashback route is implemented as a redirect to /services/become-partner and must not be used as exact monthly customer cashback evidence.",
-    confidence:"signal_only"
+    public_page_has_partner_onboarding_section:true,
+    evidence_note:"The public cashback page confirms program caps/limits but not exact current percentages for each category.",
+    confidence:"rules_only"
   };
 }
 
 function normalizeAbankCashbackRulesStructured(text,structured) {
+  const raw=String(text||"");
   const categoryPool=[
     "Краса","Медицина","Продукти та супермаркети","Авто та АЗС","Одяг та взуття",
     "Мандри","Розваги та спорт","Кафе та ресторани","Кіно","Таксі",
     "Тварини","Книги","Відеоігри","Квіти","Фастфуд"
   ];
+  const maxCash=raw.match(/Максимальн\p{L}*\s+сума\s+кешбек\p{L}*\s+у\s+місяц\p{L}*\s+не\s+може\s+перевищувати\s+(\d[\d\s]*)\s*грн/iu);
+  const minWithdraw=raw.match(/загальна\s+сукупна\s+сума\s+накопичен\p{L}*\s+кешбек\p{L}*[\s\S]{0,80}?понад\s+(\d[\d\s]*)\s*грн/iu);
+  const tax=raw.match(/утримано\s+податок[\s\S]{0,80}?(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
+  const validToMatch=raw.match(/Програма\s+діє\s+до\s+(\d{1,2})\s+(січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)\s+(20\d{2})/iu);
+  const validTo=validToMatch?parseUaDate(validToMatch[0]):"2026-12-31";
   return {
     ...structured,
     items:[],
@@ -837,12 +854,12 @@ function normalizeAbankCashbackRulesStructured(text,structured) {
       partner_categories:"available_to_choose_or_preselected"
     },
     limits:{
-      max_cashback_uah:500,
-      min_withdrawal_uah:100
+      max_cashback_uah:maxCash?Number(String(maxCash[1]).replace(/\s+/g,"")):500,
+      min_withdrawal_uah:minWithdraw?Number(String(minWithdraw[1]).replace(/\s+/g,"")):100
     },
-    tax_rate_percent:23,
+    tax_rate_percent:tax?parseRateNumber(tax[1]):23,
     visa_only_from:"2025-10-01",
-    valid_to:"2026-12-31",
+    valid_to:validTo,
     exact_current_rates_public:false,
     current_rates_location:"àbank24 / current bank offer",
     rules_note:"Official rules define the category pool and program conditions, but do not provide reliable current-month percentages for each category.",
@@ -2089,6 +2106,63 @@ async function loadSource(source: any) {
         status:"reviewed",review_note:"Автоматично закрито: офіційні сторінки izibank знову узгоджені.",
         reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()
       }).eq("source_id","izibank-market").eq("candidate_type","official_source_conflict").eq("status","pending");
+    }
+  } catch (_) {}
+
+  // Cross-check A-Bank's official public cashback page against its official program rules.
+  // Exact monthly rates stay app-only, but caps, limits and tax wording should agree.
+  try {
+    const {data:abRows}=await service.from("scanner_snapshots")
+      .select("source_id,structured_payload")
+      .eq("run_id",run.id)
+      .in("source_id",["abank-cashback","abank-cashback-rules"]);
+    const abMap=new Map((abRows||[]).map((x:any)=>[x.source_id,x.structured_payload||{}]));
+    const landing:any=abMap.get("abank-cashback")||{};
+    const rules:any=abMap.get("abank-cashback-rules")||{};
+    const landingTax=Number(landing.tax_rate_percent);
+    const rulesTax=Number(rules.tax_rate_percent);
+    const taxConflict=Number.isFinite(landingTax)&&Number.isFinite(rulesTax)&&Math.abs(landingTax-rulesTax)>0.0001;
+    const landingMax=Number(landing?.limits?.max_cashback_uah);
+    const rulesMax=Number(rules?.limits?.max_cashback_uah);
+    const maxConflict=Number.isFinite(landingMax)&&Number.isFinite(rulesMax)&&Math.abs(landingMax-rulesMax)>0.0001;
+    const landingMin=Number(landing?.limits?.min_withdrawal_uah);
+    const rulesMin=Number(rules?.limits?.min_withdrawal_uah);
+    const minConflict=Number.isFinite(landingMin)&&Number.isFinite(rulesMin)&&Math.abs(landingMin-rulesMin)>0.0001;
+    if(taxConflict||maxConflict||minConflict){
+      const review={
+        kind:"official_source_conflict",
+        bank:"àбанк",
+        detected_on:new Date().toISOString().slice(0,10),
+        fields:{
+          tax_rate_percent:{landing:Number.isFinite(landingTax)?landingTax:null,rules:Number.isFinite(rulesTax)?rulesTax:null,conflict:taxConflict},
+          max_cashback_uah:{landing:Number.isFinite(landingMax)?landingMax:null,rules:Number.isFinite(rulesMax)?rulesMax:null,conflict:maxConflict},
+          min_withdrawal_uah:{landing:Number.isFinite(landingMin)?landingMin:null,rules:Number.isFinite(rulesMin)?rulesMin:null,conflict:minConflict}
+        },
+        reasons:[
+          ...(taxConflict?[`Official A-Bank cashback page says tax ${landingTax}%, while official program rules say ${rulesTax}%.`]:[]),
+          ...(maxConflict?["Official A-Bank page and rules disagree on monthly cashback maximum."]:[]),
+          ...(minConflict?["Official A-Bank page and rules disagree on minimum withdrawal amount."]:[])
+        ],
+        auto_publish:false
+      };
+      const conflictHash=await sha256(JSON.stringify(review));
+      const {data:existing}=await service.from("scanner_candidates").select("id")
+        .eq("source_id","abank-cashback-rules").eq("candidate_type","official_source_conflict")
+        .eq("new_hash",conflictHash).limit(1);
+      if(!existing?.length){
+        const {data:created,error}=await service.from("scanner_candidates").insert({
+          run_id:run.id,source_id:"abank-cashback-rules",bank:"àбанк",candidate_type:"official_source_conflict",
+          priority:"high",source_role:"primary",old_hash:null,new_hash:conflictHash,affected_cells:[],
+          excerpt:"Official A-Bank cashback page and program rules contain conflicting program conditions.",
+          parser_version:PARSER_VERSION,structured_payload:{...rules,source_consistency_review:review},status:"pending"
+        }).select("id").single();
+        if(!error&&created)candidates++;
+      }
+    } else {
+      await service.from("scanner_candidates").update({
+        status:"reviewed",review_note:"Автоматично закрито: офіційні сторінки А-Банку знову узгоджені.",
+        reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()
+      }).eq("source_id","abank-cashback-rules").eq("candidate_type","official_source_conflict").eq("status","pending");
     }
   } catch (_) {}
 
