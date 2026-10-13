@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 50;
+const PARSER_VERSION = 51;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -333,9 +333,20 @@ function extractPumbPartnerRoster(rawHtml) {
   const marker = "partnersList:[";
   const start = raw.indexOf(marker);
   if (start < 0) return [];
-  let segment = raw.slice(start + marker.length, start + marker.length + 80_000);
-  const end = segment.indexOf("schemaName:J");
-  if (end > 0) segment = segment.slice(0, end);
+
+  const open = start + marker.length - 1;
+  let depth = 0, end = -1;
+  for (let i = open; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "[") depth++;
+    else if (ch === "]") {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  if (end <= open) return [];
+  const segment = raw.slice(open + 1, end);
+
   const names = [];
   const seen = new Set();
   const parts = segment.split("{name:").slice(1);
@@ -370,12 +381,8 @@ function mergePumbPartnerRoster(structured, rawHtml) {
   const roster = extractPumbPartnerRoster(rawHtml);
   if (!roster.length) return structured;
   const existing = Array.isArray(structured?.items) ? structured.items : [];
-  const merged = [...existing];
-  const keys = new Set(existing.map((x) => String(x?.partner || x?.name || "").toLocaleLowerCase("uk-UA")));
-  for (const item of roster) {
-    const key = String(item.partner || item.name || "").toLocaleLowerCase("uk-UA");
-    if (!keys.has(key)) { keys.add(key); merged.push(item); }
-  }
+  const nonPartnerItems = existing.filter((x) => x?.kind !== "partner");
+  const merged = [...nonPartnerItems, ...roster];
   return {
     ...structured,
     items: merged,
@@ -405,6 +412,7 @@ function sensePartnerCategory(line) {
   const x = compactLabel(line).toLocaleLowerCase("uk-UA");
   const defs = [
     ["Маркетплейси", /^маркетплейс(?:и)?$/u],
+    ["Освіта", /^освіта$/u],
     ["Одяг та взуття", /^одяг[,\s]+взуття(?:[,\s]+аксесуари)?$/u],
     ["Аксесуари / багаж", /^аксесуари[,\s]+валізи$/u],
     ["Краса", /^(?:beauty|краса)$/u],
