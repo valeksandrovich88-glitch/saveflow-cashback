@@ -1462,7 +1462,7 @@ async function loadSenseMonthlyPartnersSource() {
     }
   }
   if(!articleUrl){
-    const slugMatch=hubHtml.match(new RegExp('href=["\\']([^"\\']*\\/cash-u-news\\/[^"\\']*'+monthName+'[^"\\']*)["\\']','iu'));
+    const slugMatch=hubHtml.match(new RegExp(`href=["\']([^"\']*\\/cash-u-news\\/[^"\']*${monthName}[^"\']*)["\']`,`iu`));
     if(slugMatch) articleUrl=new URL(slugMatch[1],root).toString();
   }
   if(!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
