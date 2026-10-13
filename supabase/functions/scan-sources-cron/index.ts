@@ -3,7 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 45;
+const PARSER_VERSION = 46;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -724,6 +724,47 @@ function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
   };
 }
 
+function normalizeIdeaCashbackStructured(rawHtml,text,structured) {
+  const raw=String(rawHtml||"");
+  const plain=String(text||"");
+  const categoryPool=[];
+  const add=(x)=>{ if(x&&!categoryPool.includes(x)) categoryPool.push(x); };
+  const hay=[raw,plain].join("\n").toLocaleLowerCase("uk-UA");
+  if(/транспорт/iu.test(hay)) add("Транспорт");
+  if(/краса\s+та\s+догляд|\bкраса\b/iu.test(hay)) add("Краса");
+  if(/аптек/iu.test(hay)) add("Аптеки / здоров'я");
+  if(/одяг\s+та\s+взуття/iu.test(hay)) add("Одяг та взуття");
+  if(/продукт/iu.test(hay)) add("Продукти");
+  if(/кафе\s+та\s+ресторани|кафе.*ресторани/iu.test(hay)) add("Кафе та ресторани");
+  if(/\bАЗС\b/iu.test(raw) || /\bазс\b/iu.test(hay)) add("АЗС");
+
+  const pdfMatch=raw.match(/href=["']([^"']*Katehorii-ta-vynahoroda-za-keshbekom\.pdf)["']/iu);
+  const rateDocumentUrl=pdfMatch?new URL(pdfMatch[1],"https://ideabank.ua").toString():null;
+  const currentMonth=currentMonthWindow();
+  return {
+    ...structured,
+    items:[],
+    item_count:0,
+    rates_percent:[],
+    category_pool:categoryPool,
+    category_pool_source:"official_cashback_faq",
+    selection:{cadence:"monthly",max_categories:2},
+    limits:{...(structured?.limits||{}),max_cashback_uah:500},
+    conditions:[
+      "Категорії активуються у мобільному O.Bank.",
+      "Щомісяця можна обрати дві категорії.",
+      "Кешбек нараховується за покупки за рахунок кредитних коштів.",
+      "Виведення бонусів доступне від 120 грн; максимальний ліміт виведення 500 грн на місяць."
+    ],
+    valid_from:currentMonth.valid_from,
+    valid_to:currentMonth.valid_to,
+    exact_rates_public_in_html:false,
+    rate_document_url:rateDocumentUrl,
+    rate_document_currently_linked:Boolean(rateDocumentUrl),
+    confidence:categoryPool.length>=5?"signal_only":(structured?.confidence||"signal_only")
+  };
+}
+
 function normalizeCrystalbankCashbackStructured(rawHtml,text,structured) {
   const raw=String(rawHtml||"");
   const block=raw.match(/MY\s+CRYSTALBANK\s+Cash[^<]{0,40}[\s\S]{0,900}?Власні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%[\s\S]{0,240}?Кредитні\s+кошти\s*(?:&ndash;|[-–—])\s*(\d{1,3}(?:[.,]\d+)?)\s*%/iu);
@@ -919,6 +960,23 @@ function evidenceAliases(s) {
   if(/усі покупки|всі покупки/.test(n)) return ["усі покупки","всі покупки","усі покупки","всі товари"];
   return n.split(" ").filter(x=>x.length>=4).slice(0,3);
 }
+function percentList(s) {
+  return [...String(s||"").replace(/,/g,".").matchAll(/(\d+(?:\.\d+)?)\s*%/g)]
+    .map((m)=>Number(m[1]))
+    .filter((x)=>Number.isFinite(x));
+}
+function hasExactOfficialEvidence(cell, structured) {
+  const aliases=evidenceAliases(cell?.category||"");
+  const items=Array.isArray(structured?.items)?structured.items:[];
+  return items.some((item)=>{
+    const t=evidenceNorm([item?.category,item?.name,...(Array.isArray(item?.evidence)?item.evidence:[])].filter(Boolean).join(" "));
+    const categoryHit=aliases.some((a)=>a&&t.includes(evidenceNorm(a)));
+    if(!categoryHit) return false;
+    const explicit=item?.current_value||item?.rate_text||"";
+    return item?.rate_percent!=null || percentList(explicit).length>0;
+  });
+}
+
 function filterAffectedByEvidence(affected, structured) {
   const items=Array.isArray(structured?.items)?structured.items:[];
   const pool=Array.isArray(structured?.category_pool)?structured.category_pool:[];
@@ -1371,6 +1429,7 @@ async function loadSource(source: any) {
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
         if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
         if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
+        if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
         hash=await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
@@ -1543,7 +1602,7 @@ async function loadSource(source: any) {
 
     for(const [bank,cells] of byBank.entries()){
       const officialPayloads=payloadsByBank.get(bank)||[];
-      const uncovered=cells.filter(cell=>!officialPayloads.some(payload=>filterAffectedByEvidence([cell],payload).length>0));
+      const uncovered=cells.filter(cell=>!officialPayloads.some(payload=>hasExactOfficialEvidence(cell,payload)));
       const sorted=[...uncovered].sort((a,b)=>String(a.cell_key).localeCompare(String(b.cell_key),"uk"));
 
       if(!sorted.length){
