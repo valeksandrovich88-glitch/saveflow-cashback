@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 61;
+const PARSER_VERSION = 66;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -389,7 +389,57 @@ function mergePumbPartnerRoster(structured, rawHtml) {
     item_count: merged.length,
     partner_roster_count: roster.length,
     partner_roster_source: "official_embedded_partnersList",
+    partner_roster_complete:false,
+    partner_roster_note:"Embedded partnersList is treated as a discovery list only. Current-month removals/rates are audited against the dated monthly PUMB article.",
     confidence: roster.length >= 20 ? "review_ready" : (structured?.confidence || "signal_only")
+  };
+}
+
+function extractPumbMonthlyPartnerRoster(text) {
+  const lines=String(text||"").split(/\n+/).map(compactLabel).filter(Boolean);
+  const start=lines.findIndex(x=>/Підключайте\s+партнерський\s+кешбек\s+у\s+ПУМБ\s+у\s+жовтні/iu.test(x));
+  if(start<0)return [];
+  const month=currentMonthWindow();
+  const map=new Map();
+  for(let i=start+1;i<lines.length;i++){
+    const line=lines[i];
+    if(/^Деякі\s+пропозиції\s+є\s+персоналізованими/iu.test(line))break;
+    const m=line.match(/^(.{2,100}?)\s*(?:[-–—]\s*)?(до\s+)?(\d{1,3}(?:[.,]\d+)?)\s*%\s+(.+)$/iu);
+    if(!m)continue;
+    const name=compactLabel(m[1]).replace(/[«»"]/g,"").trim();
+    const rate=parseRateNumber(m[3]);
+    if(!name||rate===null)continue;
+    const key=partnerRosterKey(name);
+    if(!key)continue;
+    const currentValue=(m[2]?"до ":"")+String(rate).replace(".",",")+"%";
+    const item={
+      kind:"partner",name,partner:name,category:null,
+      rate_percent:rate,rate_text:currentValue,current_value:currentValue,
+      valid_from:month.valid_from,valid_to:month.valid_to,
+      evidence:[line.slice(0,500)],conditions:[compactLabel(m[4]).slice(0,500)]
+    };
+    const prev=map.get(key);
+    if(!prev || Number(item.rate_percent)>Number(prev.rate_percent) || (m[2]&&!String(prev.current_value||"").startsWith("до "))){
+      map.set(key,item);
+    }
+  }
+  return [...map.values()];
+}
+
+function normalizePumbMonthlyStructured(text,structured){
+  const roster=extractPumbMonthlyPartnerRoster(text);
+  const month=currentMonthWindow();
+  return {
+    ...structured,
+    items:roster,
+    item_count:roster.length,
+    rates_percent:uniqNumbers(roster.map(x=>x.rate_percent).filter(x=>x!==null)),
+    valid_from:month.valid_from,
+    valid_to:month.valid_to,
+    partner_roster_count:roster.length,
+    partner_roster_source:"official_monthly_pumb_article",
+    partner_roster_complete:true,
+    confidence:roster.length>=100?"review_ready":"signal_only"
   };
 }
 
@@ -733,6 +783,275 @@ function normalizeMonobankRulesStructured(text,structured) {
     partner_definition_mode:"merchant",
     current_category_rates_change_monthly:true,
     confidence:"rules_only"
+  };
+}
+
+function normalizeUkrCapitalCapicardStructured(text,structured) {
+  const raw=String(text||"");
+  const product=/CAPICARD|Capibank/iu.test(raw);
+  const rate=/0[.,]5\s*%/u.test(raw) && /Cashback|Кешбек/iu.test(raw);
+  const max=/не\s+більше[^\n]{0,80}?500[.,]00\s*грн|максимальн\p{L}*[^\n]{0,80}?500\s*грн/iu.test(raw);
+  const min=/мінімальн\p{L}*[^\n]{0,80}?10[.,]00\s*грн/iu.test(raw);
+  const cats=[
+    ["Продукти",/Супермаркети\s*:/iu,"Супермаркети"],
+    ["Кафе та ресторани",/Ресторани\s+та\s+фастфуди\s*:/iu,"Ресторани та фастфуди"],
+    ["АЗС",/АЗС\s*:/u,"АЗС"],
+    ["Аптеки / здоров'я",/Аптеки\s*:|Медичн\p{L}*\s+сервіс\s*:/iu,"Аптеки та медичний сервіс"],
+    ["Одяг та взуття",/Одяг\s+та\s+взуття\s*:/iu,"Одяг та взуття"],
+    ["Техніка",/Електроніка\s*:/iu,"Електроніка"]
+  ];
+  const conditions=[
+    "Тарифний пакет CAPICARD / Capibank.",
+    "Кешбек нараховується за рахунками у гривні та лише за визначеними MCC.",
+    min?"Мінімальна сума виплати — 10 грн.":null,
+    max?"Максимальна сума виплати — 500 грн на місяць.":null
+  ].filter(Boolean);
+  const items:any[]=[];
+  if(product&&rate){
+    for(const [category,re,label] of cats){
+      if(!(re as RegExp).test(raw))continue;
+      items.push({
+        kind:"category",name:category,category,partner:null,
+        rate_percent:0.5,rate_text:"0,5%",current_value:"0,5%",
+        valid_from:"2026-06-08",valid_to:null,
+        evidence:[`${label}: 0,5% за визначеними MCC`],
+        conditions
+      });
+    }
+  }
+  return {
+    ...structured,items,item_count:items.length,
+    rates_percent:items.length?[0.5]:[],
+    limits:{...(structured?.limits||{}),max_cashback_uah:max?500:null,min_cashback_uah:min?10:null},
+    valid_from:"2026-06-08",
+    confidence:items.length>=6?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:items.length>=6,
+    current_product:"CAPICARD / Capibank"
+  };
+}
+
+function normalizePolicomCashbackStructured(text,structured) {
+  const raw=String(text||"");
+  const card=/ПРОСТІР[-–— ]Винагорода|картк\p{L}*\s+з\s+кешбек/iu.test(raw);
+  const rate=/0[.,]4\s*%/u.test(raw);
+  const max=/Максимальн\p{L}*[^\n]{0,100}?500\s*грн/iu.test(raw);
+  const defs=[
+    ["Продукти",/продовольчн\p{L}*\s+товар/iu,"Продовольчі товари"],
+    ["Одяг та взуття",/одяг\p{L}*\s+та\s+взутт/iu,"Одяг та взуття"],
+    ["Техніка",/побутов\p{L}*\s+технік/iu,"Побутова техніка"],
+    ["Аптеки / здоров'я",/товар\p{L}*\s+для\s+здоров|медицин|аптек/iu,"Здоров’я та медицина"],
+    ["Краса",/здоров.?я\s+та\s+крас|товар\p{L}*\s+для\s+крас/iu,"Краса"],
+    ["Тварини",/зоотовар|ветерин/iu,"Зоотовари та ветеринарні клініки"],
+    ["Книги та канцтовари",/книг\p{L}*\s+і\s+газет|книг/iu,"Книги та газети"],
+    ["Квіти",/квіт/iu,"Квіти"],
+    ["АЗС",/\bАЗС\b/u,"АЗС"],
+    ["Кафе та ресторани",/кафе\s+та\s+ресторан/iu,"Кафе та ресторани"],
+    ["Таксі",/таксі/iu,"Таксі"]
+  ];
+  const conditions=[
+    "Картка «ПРОСТІР-Винагорода».",
+    "Ставка 0,4% діє з 01.07.2026 за визначеними MCC.",
+    "Кешбек не нараховується на комунальні послуги та грошові перекази.",
+    max?"Максимальний кешбек — 500 грн на місяць.":null
+  ].filter(Boolean);
+  const items:any[]=[];
+  if(card&&rate){
+    for(const [category,re,label] of defs){
+      if(!(re as RegExp).test(raw))continue;
+      items.push({
+        kind:"category",name:category,category,partner:null,
+        rate_percent:0.4,rate_text:"0,4%",current_value:"0,4%",
+        valid_from:"2026-07-01",valid_to:null,
+        evidence:[`${label}: 0,4% за визначеними MCC`],
+        conditions
+      });
+    }
+  }
+  return {
+    ...structured,items,item_count:items.length,
+    rates_percent:items.length?[0.4]:[],
+    limits:{...(structured?.limits||{}),max_cashback_uah:max?500:null},
+    valid_from:"2026-07-01",
+    confidence:items.length>=8?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:items.length>=8,
+    current_product:"ПРОСТІР-Винагорода"
+  };
+}
+
+function normalizeMtbRuhStructured(text,structured) {
+  const raw=String(text||"");
+  const hasRate=/АЗС\s+та\s+медицин\p{L}*\s*[-–—:]?\s*2\s*%/iu.test(raw);
+  const credit=/кредитн\p{L}*\s+кошт/iu.test(raw);
+  const max=raw.match(/максимальн\p{L}*[^\n]{0,120}?500\s*грн/iu);
+  const min=raw.match(/мінімальн\p{L}*[^\n]{0,120}?10\s*грн/iu);
+  const conditions=[
+    "Кредитна картка «Рух».",
+    credit?"Кешбек нараховується за безготівкові покупки кредитними коштами.":null,
+    max?"Максимальне повернення — 500 грн на місяць.":null,
+    min?"Мінімальна сума повернення — 10 грн на місяць.":null
+  ].filter(Boolean);
+  const items:any[]=[];
+  if(hasRate){
+    for(const category of ["АЗС","Аптеки / здоров'я"]){
+      items.push({
+        kind:"category",name:category,category,partner:null,
+        rate_percent:2,rate_text:"2%",current_value:"2%",
+        valid_from:null,valid_to:null,
+        evidence:["Послуга Cash Back — АЗС та медицина — 2%."],
+        conditions
+      });
+    }
+  }
+  return {
+    ...structured,items,item_count:items.length,rates_percent:hasRate?[2]:[],
+    limits:{...(structured?.limits||{}),max_cashback_uah:max?500:null,min_cashback_uah:min?10:null},
+    confidence:hasRate?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:hasRate,current_product:"Кредитна картка «Рух»"
+  };
+}
+
+function normalizeMtbCitizenCardStructured(text,structured) {
+  const raw=String(text||"");
+  const medicine=/Аптек\p{L}*\s+та\s+медицин\p{L}*\s*[-–—:]?\s*5\s*%/iu.test(raw);
+  const cafe=/(?:Фаст[- ]?фуд|їдальн\p{L}*|ресторан\p{L}*|кав.?ярн\p{L}*)[^\n]{0,160}?5\s*%/iu.test(raw);
+  const groceries=/продукт\p{L}*[^\n]{0,120}?2\s*%/iu.test(raw);
+  const items:any[]=[];
+  const add=(category,rate,evidence)=>{
+    items.push({
+      kind:"category",name:category,category,partner:null,
+      rate_percent:rate,rate_text:`${rate}%`,current_value:`${rate}%`,
+      valid_from:null,valid_to:null,evidence:[evidence],
+      conditions:["Муніципальна «Картка черкасця» від МТБ БАНК."]
+    });
+  };
+  if(medicine)add("Аптеки / здоров'я",5,"Аптеки та медицина — 5%.");
+  if(cafe)add("Кафе та ресторани",5,"Фастфуд, їдальні, ресторани та кав'ярні — 5%.");
+  if(groceries)add("Продукти",2,"Продукти — 2%.");
+  return {
+    ...structured,items,item_count:items.length,
+    rates_percent:[...new Set(items.map(x=>x.rate_percent))].sort((a,b)=>b-a),
+    confidence:items.length===3?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:items.length===3,current_product:"Картка черкасця"
+  };
+}
+
+function normalizePiraeusWinCardStructured(text,structured) {
+  const raw=String(text||"");
+  const rate=/WinCard[\s\S]{0,500}?2(?:[.,]00)?\s*%|2(?:[.,]00)?\s*%[\s\S]{0,500}?WinCard/iu.test(raw);
+  const max=/максимальн\p{L}*[^\n]{0,100}?500\s*(?:грн|UAH)|maximum[^\n]{0,100}?500\s*UAH/iu.test(raw);
+  const items:any[]=[];
+  if(rate){
+    items.push({
+      kind:"base",
+      name:"Усі покупки",
+      category:"Усі покупки",
+      partner:null,
+      rate_percent:2,
+      rate_text:"2%",
+      current_value:"2%",
+      valid_from:null,
+      valid_to:null,
+      evidence:["Офіційні правила Піреус Банку: WinCard — ставка винагороди CashBack 2,00%."],
+      conditions:[
+        "WinCard.",
+        "Без вибору категорій.",
+        "На окремі MCC-коди кешбек не нараховується.",
+        max?"Максимальний кешбек — 500 грн на місяць.":null
+      ].filter(Boolean)
+    });
+  }
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:rate?[2]:[],
+    limits:{...(structured?.limits||{}),max_cashback_uah:max?500:(structured?.limits?.max_cashback_uah??null)},
+    confidence:rate?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:rate,
+    current_product:"WinCard"
+  };
+}
+
+function normalizeAllianceStartovaStructured(text,structured) {
+  const raw=String(text||"");
+  const welcome=/Кешбек\s+30\s*%\s+на\s+покупки/iu.test(raw);
+  const base=/переключення\s+на\s+1\s*%\s+кешбек/iu.test(raw);
+  const utilities=/5\s*%\s+кешбеку\s+за\s+оплату\s+комунал/iu.test(raw);
+  const items:any[]=[];
+  const sharedConditions=[
+    "Картка «Стартова».",
+    "Кешбек на покупки нараховується як за власні, так і за кредитні кошти."
+  ];
+  if(base){
+    items.push({
+      kind:"base",
+      name:"Усі покупки",
+      category:"Усі покупки",
+      partner:null,
+      rate_percent:1,
+      rate_text:"1%",
+      current_value:"1%",
+      valid_from:null,
+      valid_to:null,
+      evidence:["Автоматичне переключення на 1% кешбеку при накопиченні 500 грн або після перших 30 днів"],
+      conditions:[
+        ...sharedConditions,
+        welcome?"30% до накопичення 500 грн кешбеку або протягом перших 30 днів; далі 1%.":"Після стартового періоду діє 1%."
+      ],
+      welcome_rate_percent:welcome?30:null,
+      welcome_limit_uah:welcome?500:null,
+      welcome_days:welcome?30:null
+    });
+  }
+  if(utilities){
+    items.push({
+      kind:"category",
+      name:"Комунальні послуги",
+      category:"Комунальні послуги",
+      partner:null,
+      rate_percent:5,
+      rate_text:"5%",
+      current_value:"5%",
+      valid_from:null,
+      valid_to:null,
+      evidence:["5% кешбеку за оплату комуналки"],
+      conditions:["Картка «Стартова»."]
+    });
+  }
+  const partners=[
+    {name:"WOG",category:"АЗС",rate:4,evidence:"4% на пальне, товари та смаколики у WOG",re:/4\s*%[^\n]{0,120}\bWOG\b|\bWOG\b[^\n]{0,120}4\s*%/iu},
+    {name:"VARUS",category:"Продукти",rate:10,evidence:"10% на продукти у VARUS",re:/10\s*%[^\n]{0,120}\bVARUS\b|\bVARUS\b[^\n]{0,120}10\s*%/iu},
+    {name:"Фокстрот",category:"Техніка",rate:5,evidence:"5% на техніку у Фокстрот",re:/5\s*%[^\n]{0,120}Фокстрот|Фокстрот[^\n]{0,120}5\s*%/iu},
+    {name:"UPG",category:"АЗС",rate:4,evidence:"4% кешбеку на UPG",re:/4\s*%[^\n]{0,120}\bUPG\b|\bUPG\b[^\n]{0,120}4\s*%/iu}
+  ];
+  for(const p of partners){
+    if(!p.re.test(raw))continue;
+    items.push({
+      kind:"partner",
+      name:p.name,
+      partner:p.name,
+      category:p.category,
+      rate_percent:p.rate,
+      rate_text:`${p.rate}%`,
+      current_value:`${p.rate}%`,
+      valid_from:null,
+      valid_to:null,
+      evidence:[p.evidence],
+      conditions:["Партнерська пропозиція для картки «Стартова»."]
+    });
+  }
+  const exact=base&&welcome;
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:[...new Set(items.map(x=>Number(x.rate_percent)).filter(Number.isFinite))].sort((a,b)=>b-a),
+    limits:{...(structured?.limits||{}),welcome_cashback_uah:welcome?500:null},
+    confidence:exact?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:exact,
+    partner_roster_complete:false,
+    current_product:"Картка «Стартова»",
+    current_product_page:true
   };
 }
 
@@ -1823,6 +2142,73 @@ async function loadSenseMonthlyPartnersSource() {
   };
 }
 
+async function loadUkrCapitalCapicardSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://ukrcapital.com.ua/uk/",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(30000)});
+  if(!res.ok) throw new Error("UkrCapital CAPICARD tariff HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const binaryHash=await sha256Bytes(bytes);
+  const parsed=await pdf(Buffer.from(bytes));
+  const raw=String(parsed.text||"").replace(/\r/g,"\n");
+  if(raw.length<3000 || !/CAPICARD|Capibank/iu.test(raw) || !/0[.,]5\s*%/u.test(raw) || !/Супермаркети/iu.test(raw)){
+    throw new Error("UkrCapital CAPICARD tariff PDF text extraction failed");
+  }
+  return {
+    status:res.status,raw,responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:String(res.headers.get("content-type")||"application/pdf"),
+    binaryHash,transport:"ukrcapital_capicard_pdf",resolvedUrl:sourceUrl
+  };
+}
+
+async function loadPiraeusCashbackRulesSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://www.piraeusbank.ua/ua/individuals/payment-cards/wincard-iz-keshbekom",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(30000)});
+  if(!res.ok) throw new Error("Piraeus cashback rules HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const contentType=String(res.headers.get("content-type")||"");
+  const magic=bytes.length>=5?String.fromCharCode(...bytes.slice(0,5)):"";
+  let raw="";
+  let transport="piraeus_rules_html";
+  let binaryHash:string|null=null;
+  if(/application\/pdf/i.test(contentType)||magic==="%PDF-"){
+    binaryHash=await sha256Bytes(bytes);
+    const parsed=await pdf(Buffer.from(bytes));
+    raw=String(parsed.text||"").replace(/\r/g,"\n");
+    transport="piraeus_rules_pdf";
+  }else{
+    raw=new TextDecoder().decode(bytes);
+  }
+  const plain=/</.test(raw)?cleanText(raw):raw;
+  if(plain.length<200 || !/WinCard/iu.test(plain) || !/2(?:[.,]00)?\s*%/u.test(plain) || !/CashBack/iu.test(plain)){
+    throw new Error("Piraeus cashback rules sanity check failed");
+  }
+  return {
+    status:res.status,
+    raw:plain,
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:contentType||"application/pdf",
+    binaryHash,
+    transport,
+    resolvedUrl:sourceUrl
+  };
+}
+
 async function loadMonobankRulesPdfSource(sourceUrl:string) {
   const headers={
     "User-Agent":BROWSER_UA,
@@ -2050,6 +2436,12 @@ async function loadIdeaCashbackCategoriesPdfSource(sourceUrl:string) {
 }
 
 async function loadSource(source: any) {
+    if (source.id === "ukrcapital-capicard-cashback") {
+      return await loadUkrCapitalCapicardSource(source.url);
+    }
+    if (source.id === "piraeus-wincard-cashback") {
+      return await loadPiraeusCashbackRulesSource(source.url);
+    }
     if (source.id === "oschad-subscriptions-rules") {
       return await loadMastercardSubscriptionSource();
     }
@@ -2100,6 +2492,13 @@ async function loadSource(source: any) {
         text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
         if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
+        if(source.id==="pumb-partners-monthly") structured=normalizePumbMonthlyStructured(text,structured);
+        if(source.id==="alliance-startova") structured=normalizeAllianceStartovaStructured(text,structured);
+        if(source.id==="piraeus-wincard-cashback") structured=normalizePiraeusWinCardStructured(text,structured);
+        if(source.id==="mtb-ruh-cashback") structured=normalizeMtbRuhStructured(text,structured);
+        if(source.id==="mtb-citizen-card-cashback") structured=normalizeMtbCitizenCardStructured(text,structured);
+        if(source.id==="ukrcapital-capicard-cashback") structured=normalizeUkrCapitalCapicardStructured(text,structured);
+        if(source.id==="policom-cashback-card"||source.id==="policom-cashback-rate-news") structured=normalizePolicomCashbackStructured(text,structured);
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
@@ -2139,7 +2538,7 @@ async function loadSource(source: any) {
       if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":null))));
+      const partnerAuditBank=source.id==="pumb-partners-monthly"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null)))));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
