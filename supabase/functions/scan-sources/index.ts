@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 70;
+const PARSER_VERSION = 71;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -167,15 +167,20 @@ function fixedPromoSemanticText(text,title,structured) {
   const lowTitle=titleBase.toLocaleLowerCase("uk-UA");
   let start=-1;
 
-  const dateAnchor=isoToNumericPromoDate(structured?.valid_from);
-  if(dateAnchor){
-    const dateIdx=raw.indexOf(dateAnchor);
-    if(dateIdx>=0) start=Math.max(0,dateIdx-650);
-  }
-  if(start<0&&lowTitle.length>=8){
+  // Anchor on the campaign heading first. Dates often also appear in rotating
+  // "other offers" blocks, which caused false promo changes even when the
+  // campaign body itself was identical.
+  if(lowTitle.length>=8){
     const first=lowRaw.indexOf(lowTitle);
     const last=lowRaw.lastIndexOf(lowTitle);
     start=last>=0?last:first;
+  }
+  if(start<0){
+    const dateAnchor=isoToNumericPromoDate(structured?.valid_from);
+    if(dateAnchor){
+      const dateIdx=raw.indexOf(dateAnchor);
+      if(dateIdx>=0) start=Math.max(0,dateIdx-650);
+    }
   }
   if(start<0)start=0;
 
