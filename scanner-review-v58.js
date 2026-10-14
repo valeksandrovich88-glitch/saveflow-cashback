@@ -35,6 +35,7 @@
     .sf-scan-btn:disabled{opacity:.52;cursor:wait}
     .sf-scan-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:12px 18px}
     .sf-scan-stat{padding:10px 11px;border:1px solid #d5e2d8;border-radius:12px;background:#eef6f0}.sf-scan-stat b{display:block;font-size:16px}.sf-scan-stat span{font-size:9px;color:#6c7b70}.sf-scan-overview{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:9px;padding:0 18px 12px}.sf-overview-card{border:1px solid #d3e0d6;border-radius:13px;background:#f2f7f3;padding:11px}.sf-overview-title{font:800 11px/1.2 system-ui;margin-bottom:8px}.sf-health-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.sf-health-box{padding:8px;border-radius:9px;background:#e8f1ea}.sf-health-box b{display:block;font-size:13px}.sf-health-box span{font-size:8px;color:#68786d}.sf-health-note{margin-top:7px;font-size:8px;line-height:1.4;color:#68776c}.sf-rollover-list{display:grid;gap:5px}.sf-rollover-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 8px;border-radius:9px;background:#eaf2ec;font-size:9px}.sf-rollover-item b{font-size:9px}.sf-rollover-item span{white-space:nowrap;color:#5f7065}.sf-rollover-item.expired{background:#f8e5e5}.sf-rollover-item.soon{background:#fff0d8}.sf-rollover-empty{font-size:9px;color:#718077;padding:6px 1px}
+    .sf-overview-card.wide{grid-column:1/-1}.sf-manual-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;margin-bottom:8px}.sf-manual-head p{margin:2px 0 0;font-size:8px;color:#6d7b71;line-height:1.35}.sf-manual-count{font:800 10px/1 system-ui;white-space:nowrap;padding:5px 7px;border-radius:999px;background:#e5efe7;color:#365741}.sf-manual-count.due{background:#fff0d8;color:#8b5318}.sf-manual-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.sf-manual-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px;border-radius:10px;background:#eaf2ec;border:1px solid transparent}.sf-manual-row.soon{background:#fff8e9;border-color:#eadcc1}.sf-manual-row.due{background:#f8e5e5;border-color:#e7c1c1}.sf-manual-row b{display:block;font-size:9px}.sf-manual-meta{margin-top:2px;font-size:8px;color:#68776c;line-height:1.35}.sf-manual-actions{display:flex;gap:5px;align-items:center}.sf-manual-actions .sf-scan-btn{padding:6px 7px;font-size:8px}.sf-manual-more{grid-column:1/-1;font-size:8px;color:#6d7a70;padding:2px 1px}
     .sf-scan-tabs{display:flex;gap:6px;padding:0 18px 10px}.sf-scan-tab{border:0;border-radius:9px;padding:7px 10px;background:#e7efe9;color:#4c6253;font:750 10px system-ui;cursor:pointer}
     .sf-scan-tab.active{background:#294f39;color:white}
     .sf-scan-body{overflow:auto;padding:0 18px 18px;display:grid;gap:10px}
@@ -75,7 +76,7 @@
         </div>
       </div>
       <div class="sf-scan-summary" id="sfScanSummary"></div>
-      <div class="sf-scan-overview"><div class="sf-overview-card" id="sfScanHealth"></div><div class="sf-overview-card" id="sfScanRollover"></div></div>
+      <div class="sf-scan-overview"><div class="sf-overview-card" id="sfScanHealth"></div><div class="sf-overview-card" id="sfScanRollover"></div><div class="sf-overview-card wide" id="sfScanManual"></div></div>
       <div class="sf-scan-tabs">
         <button class="sf-scan-tab active" data-scan-tab="pending">На перевірці</button>
         <button class="sf-scan-tab" data-scan-tab="all">Останні</button>
@@ -208,12 +209,13 @@
   function renderOverview(){
     const sources=Object.values(state.sources).filter(x=>x.enabled!==false&&x.source_role==='primary');
     const issues=sources.filter(src=>{
+      if(src.publish_policy==='manual_only')return false;
       if(src.last_error)return true;
       const p=state.latestSnapshots[src.id]?.structured_payload||{};
       if(!p.unsupported)return false;
       const reason=String(p.reason||'');
       if(/^(antibot_|access_denied)/.test(reason))return true;
-      return !(src.publish_policy==='manual_only'||src.data_mode==='dynamic'||src.data_mode==='personalized');
+      return !(src.data_mode==='dynamic'||src.data_mode==='personalized');
     });
     const issueIds=new Set(issues.map(x=>x.id));
     const manual=sources.filter(x=>!issueIds.has(x.id)&&(x.publish_policy==='manual_only'||x.data_mode==='dynamic'||x.data_mode==='personalized'));
@@ -233,6 +235,39 @@
           <div class="sf-health-box"><b>${issues.length}</b><span>потребують уваги</span></div>
         </div>
         ${issueNames.length?`<div class="sf-health-note">${issueNames.map(esc).join('<br>')}</div>`:'<div class="sf-health-note">Критичних проблем у джерелах, які мають читатися автоматично, немає.</div>'}`;
+    }
+
+    const manualOnly=sources.filter(x=>x.publish_policy==='manual_only');
+    const nowExact=Date.now();
+    const manualRows=manualOnly.map(src=>{
+      const reviewed=src.manual_reviewed_at?new Date(src.manual_reviewed_at):null;
+      const reviewedTs=reviewed&&!Number.isNaN(reviewed.getTime())?reviewed.getTime():null;
+      const days=reviewedTs==null?999:Math.max(0,Math.floor((nowExact-reviewedTs)/86400000));
+      const interval=Math.max(7,Number(src.manual_review_interval_days||35));
+      const due=reviewedTs==null||days>=interval;
+      const soon=!due&&days>=Math.max(0,interval-7);
+      return {src,reviewed,days,interval,due,soon};
+    }).sort((a,b)=>Number(b.due)-Number(a.due)||Number(b.soon)-Number(a.soon)||b.days-a.days||String(a.src.bank||a.src.id).localeCompare(String(b.src.bank||b.src.id),'uk'));
+    const manualDue=manualRows.filter(x=>x.due).length;
+    const manualEl=document.getElementById('sfScanManual');
+    if(manualEl){
+      const shown=manualRows.slice(0,8);
+      manualEl.innerHTML=`
+        <div class="sf-manual-head">
+          <div><div class="sf-overview-title">Ручні джерела</div><p>Не створюють anti-bot шум у черзі, але мають бути підтверджені вручну приблизно раз на місяць.</p></div>
+          <span class="sf-manual-count ${manualDue?'due':''}">${manualDue?manualDue+' потребують перевірки':manualRows.length+' актуальні'}</span>
+        </div>
+        <div class="sf-manual-list">
+          ${shown.map(({src,reviewed,days,interval,due,soon})=>{
+            const label=reviewed?`перевірено ${fmtDate(reviewed)} · ${days} дн. тому`:'ще не підтверджено вручну';
+            const dueText=due?'потрібна перевірка':soon?`перевірити протягом ${Math.max(0,interval-days)} дн.`:`наступна перевірка приблизно через ${Math.max(0,interval-days)} дн.`;
+            return `<div class="sf-manual-row ${due?'due':soon?'soon':''}">
+              <div><b>${esc(src.bank||src.publisher||src.id)}</b><div class="sf-manual-meta">${esc(src.purpose||src.id)}<br>${esc(label)} · ${esc(dueText)}</div></div>
+              <div class="sf-manual-actions"><a class="sf-scan-btn" href="${esc(src.url)}" target="_blank" rel="noopener">Відкрити ↗</a><button class="sf-scan-btn primary" data-manual-source="${esc(src.id)}">Перевірено</button></div>
+            </div>`;
+          }).join('')}
+          ${manualRows.length>shown.length?`<div class="sf-manual-more">Ще ${manualRows.length-shown.length} ручних джерел. Першими завжди показуються прострочені та найближчі до повторної перевірки.</div>`:''}
+        </div>`;
     }
 
     const now=new Date(); now.setHours(0,0,0,0);
@@ -410,7 +445,7 @@
     try{
       const [{data:cands,error:ce},{data:sources,error:se},{data:runs,error:re},{data:snaps,error:sne},{data:promos,error:pe}]=await Promise.all([
         c.from('scanner_candidates').select('*').order('created_at',{ascending:false}).limit(100),
-        c.from('scanner_sources').select('id,bank,publisher,url,purpose,source_role,data_mode,publish_policy,enabled,last_checked_at,last_http_status,last_error'),
+        c.from('scanner_sources').select('id,bank,publisher,url,purpose,source_role,data_mode,publish_policy,enabled,last_checked_at,last_http_status,last_error,manual_reviewed_at,manual_reviewed_by,manual_review_interval_days,manual_review_note'),
         c.from('scanner_runs').select('id,trigger_kind,started_at,finished_at,status,total_sources,changed_sources,failed_sources,candidates_created').order('started_at',{ascending:false}).limit(10),
         c.from('scanner_snapshots').select('source_id,fetched_at,http_status,title,text_excerpt,parser_version,structured_payload').order('fetched_at',{ascending:false}).limit(250),
         c.from('global_content_items').select('base_id,payload,hidden,source_url,updated_at').eq('block','promo').limit(250)
@@ -547,6 +582,29 @@
     await load();
   }
 
+  async function confirmManualSource(sourceId){
+    if(!isAdmin())return;
+    const c=client(),uid=session()?.user?.id;if(!c||!uid)return;
+    const src=state.sources[sourceId];if(!src)return;
+    const btn=backdrop.querySelector(`[data-manual-source="${CSS.escape(String(sourceId))}"]`);
+    if(btn)btn.disabled=true;
+    try{
+      const now=new Date().toISOString();
+      const {error}=await c.from('scanner_sources').update({
+        manual_reviewed_at:now,
+        manual_reviewed_by:uid,
+        manual_review_note:'Підтверджено вручну в Admin Scanner SaveFlow.',
+        updated_at:now
+      }).eq('id',sourceId);
+      if(error)throw error;
+      await load();
+    }catch(e){
+      console.warn('SaveFlow manual source review',e);
+      alert('Не вдалося зберегти ручну перевірку: '+(e?.message||e));
+      if(btn)btn.disabled=false;
+    }
+  }
+
   async function runNow(){
     if(!isAdmin()||state.busy)return;
     const c=client();if(!c)return;
@@ -582,6 +640,8 @@
     if(action==='run')runNow();
     const tab=e.target.closest('[data-scan-tab]')?.dataset.scanTab;
     if(tab){state.tab=tab;render()}
+    const manualBtn=e.target.closest('[data-manual-source]');
+    if(manualBtn)confirmManualSource(manualBtn.dataset.manualSource);
     const confirmBtn=e.target.closest('[data-confirm-official]');
     if(confirmBtn){
       const card=confirmBtn.closest('[data-candidate-id]');
