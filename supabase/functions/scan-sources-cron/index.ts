@@ -150,6 +150,34 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
+function fixedPromoSemanticText(text,title) {
+  const raw=String(text||"");
+  const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim();
+  const lowRaw=raw.toLocaleLowerCase("uk-UA");
+  const lowTitle=titleBase.toLocaleLowerCase("uk-UA");
+  let start=lowTitle.length>=8?lowRaw.indexOf(lowTitle):-1;
+  if(start<0)start=0;
+  let segment=raw.slice(start,start+6500);
+  const markers=[
+    /\n\s*Інші\s+акції\b/iu,
+    /\n\s*Інші\s+пропозиції\b/iu,
+    /\n\s*Поділіться\s+(?:цією\s+)?акцією\b/iu,
+    /\n\s*Поділитися\s+сторінкою\b/iu,
+    /\n\s*Читайте\s+також\b/iu,
+    /\n\s*Останні\s+новини\b/iu
+  ];
+  let cut=segment.length;
+  for(const re of markers){
+    const m=re.exec(segment);
+    if(m&&m.index>120)cut=Math.min(cut,m.index);
+  }
+  segment=segment.slice(0,cut)
+    .replace(/&(?:#0*38|amp);/giu,"&")
+    .replace(/\s+/g," ")
+    .trim();
+  return [titleBase,segment].filter(Boolean).join("\n").slice(0,6000);
+}
+
 function normalizeUkrsibFixedPromoWindow(text,structured) {
   const raw=String(text||"");
   const m=raw.match(/(?:^|\n)\s*з\s+(\d{1,2}[./-]\d{1,2}[./-]20\d{2})\s+до\s+(\d{1,2}[./-]\d{1,2}[./-]20\d{2})/iu);
@@ -2518,6 +2546,8 @@ async function loadSource(source: any) {
     try {
       const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), isPdf=loaded.documentType==="pdf", accessBlock=isPdf?null:detectAccessBlock(raw);
       let text="", focused="", safeFocused="", pageTitle=isPdf?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null), categoryPool:any[]=[], structured:any, hash:string;
+      let stablePromoPreviousHash:string|null=null;
+      let usesStablePromoFingerprint=false;
       if(loaded.documentType==="cached_structured"){
         const cached=loaded.cachedStructured&&typeof loaded.cachedStructured==="object"?loaded.cachedStructured:{};
         structured={
@@ -2584,7 +2614,24 @@ async function loadSource(source: any) {
             };
           }
         }
-        hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
+        const stablePromo=source.source_role==="primary"&&source.parser_profile==="promos"&&source.data_mode==="fixed"&&!accessBlock&&!structured.unsupported;
+        if(stablePromo){
+          usesStablePromoFingerprint=true;
+          const semantic=fixedPromoSemanticText(text,pageTitle);
+          hash=await sha256("fixed-promo-v1\n"+semantic);
+          const {data:prevPromoRows}=await service.from("scanner_snapshots")
+            .select("title,text_excerpt,structured_payload")
+            .eq("source_id",source.id)
+            .is("error",null)
+            .order("fetched_at",{ascending:false})
+            .limit(1);
+          const prev=prevPromoRows?.[0];
+          if(prev?.text_excerpt){
+            stablePromoPreviousHash=await sha256("fixed-promo-v1\n"+fixedPromoSemanticText(prev.text_excerpt,prev.title||pageTitle));
+          }
+        }else{
+          hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
+        }
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
       if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules","raif-cashback","monobank-cashback-rules"].includes(source.id)){
@@ -2613,7 +2660,12 @@ async function loadSource(source: any) {
         structured={...structured,partner_audit:partnerRosterAudit};
       }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      const isInitial=!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION, isChanged=!isInitial&&oldHash!==hash&&!structured.unsupported;
+      const isInitial=usesStablePromoFingerprint
+        ? !stablePromoPreviousHash
+        : (!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION);
+      const isChanged=usesStablePromoFingerprint
+        ? (!!stablePromoPreviousHash&&stablePromoPreviousHash!==hash&&!structured.unsupported)
+        : (!isInitial&&oldHash!==hash&&!structured.unsupported);
       const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
       await service.from("scanner_sources").update({ last_checked_at:new Date().toISOString(), last_http_status:loaded.status, last_hash:hash, last_error:null, fingerprint_version:FINGERPRINT_VERSION }).eq("id",source.id);
       // Refresh existing pending evidence after parser upgrades without creating duplicate tasks.
