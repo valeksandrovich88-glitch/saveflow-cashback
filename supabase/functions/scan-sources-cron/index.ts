@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 61;
+const PARSER_VERSION = 62;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -727,6 +727,89 @@ function normalizeMonobankRulesStructured(text,structured) {
     partner_definition_mode:"merchant",
     current_category_rates_change_monthly:true,
     confidence:"rules_only"
+  };
+}
+
+function normalizeAllianceStartovaStructured(text,structured) {
+  const raw=String(text||"");
+  const welcome=/Кешбек\s+30\s*%\s+на\s+покупки/iu.test(raw);
+  const base=/переключення\s+на\s+1\s*%\s+кешбек/iu.test(raw);
+  const utilities=/5\s*%\s+кешбеку\s+за\s+оплату\s+комунал/iu.test(raw);
+  const items:any[]=[];
+  const sharedConditions=[
+    "Картка «Стартова».",
+    "Кешбек на покупки нараховується як за власні, так і за кредитні кошти."
+  ];
+  if(base){
+    items.push({
+      kind:"base",
+      name:"Усі покупки",
+      category:"Усі покупки",
+      partner:null,
+      rate_percent:1,
+      rate_text:"1%",
+      current_value:"1%",
+      valid_from:null,
+      valid_to:null,
+      evidence:["Автоматичне переключення на 1% кешбеку при накопиченні 500 грн або після перших 30 днів"],
+      conditions:[
+        ...sharedConditions,
+        welcome?"30% до накопичення 500 грн кешбеку або протягом перших 30 днів; далі 1%.":"Після стартового періоду діє 1%."
+      ],
+      welcome_rate_percent:welcome?30:null,
+      welcome_limit_uah:welcome?500:null,
+      welcome_days:welcome?30:null
+    });
+  }
+  if(utilities){
+    items.push({
+      kind:"category",
+      name:"Комунальні послуги",
+      category:"Комунальні послуги",
+      partner:null,
+      rate_percent:5,
+      rate_text:"5%",
+      current_value:"5%",
+      valid_from:null,
+      valid_to:null,
+      evidence:["5% кешбеку за оплату комуналки"],
+      conditions:["Картка «Стартова»."]
+    });
+  }
+  const partners=[
+    {name:"WOG",category:"АЗС",rate:4,evidence:"4% на пальне, товари та смаколики у WOG",re:/4\s*%[^\n]{0,120}\bWOG\b|\bWOG\b[^\n]{0,120}4\s*%/iu},
+    {name:"VARUS",category:"Продукти",rate:10,evidence:"10% на продукти у VARUS",re:/10\s*%[^\n]{0,120}\bVARUS\b|\bVARUS\b[^\n]{0,120}10\s*%/iu},
+    {name:"Фокстрот",category:"Техніка",rate:5,evidence:"5% на техніку у Фокстрот",re:/5\s*%[^\n]{0,120}Фокстрот|Фокстрот[^\n]{0,120}5\s*%/iu},
+    {name:"UPG",category:"АЗС",rate:4,evidence:"4% кешбеку на UPG",re:/4\s*%[^\n]{0,120}\bUPG\b|\bUPG\b[^\n]{0,120}4\s*%/iu}
+  ];
+  for(const p of partners){
+    if(!p.re.test(raw))continue;
+    items.push({
+      kind:"partner",
+      name:p.name,
+      partner:p.name,
+      category:p.category,
+      rate_percent:p.rate,
+      rate_text:`${p.rate}%`,
+      current_value:`${p.rate}%`,
+      valid_from:null,
+      valid_to:null,
+      evidence:[p.evidence],
+      conditions:["Партнерська пропозиція для картки «Стартова»."]
+    });
+  }
+  const exact=base&&welcome;
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:[...new Set(items.map(x=>Number(x.rate_percent)).filter(Number.isFinite))].sort((a,b)=>b-a),
+    limits:{...(structured?.limits||{}),welcome_cashback_uah:welcome?500:null},
+    confidence:exact?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:exact,
+    partner_roster_complete:false,
+    current_product:"Картка «Стартова»",
+    current_product_page:true
   };
 }
 
@@ -2080,7 +2163,7 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
-        if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
+        if(source.id==="alliance-startova") structured=normalizeAllianceStartovaStructured(text,structured);\n        if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
         if(source.id==="monobank-cashback-rules") structured=normalizeMonobankRulesStructured(text,structured);
         if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
@@ -2116,7 +2199,7 @@ async function loadSource(source: any) {
       if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":null))));
+      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null)))));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
