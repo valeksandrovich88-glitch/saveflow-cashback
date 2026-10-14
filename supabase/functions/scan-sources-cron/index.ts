@@ -2111,36 +2111,63 @@ async function loadSenseMonthlyPartnersSource() {
     "Cache-Control": "no-cache",
     "Pragma": "no-cache",
   };
-  const hub=await fetchSenseHtml(root+"/cash-u",headers);
-  const hubHtml=hub.raw;
-  const monthName=SENSE_MONTH_NAMES[new Date().getUTCMonth()];
-  let articleUrl="";
-  for(const m of hubHtml.matchAll(/<a\b[^>]*href=["']([^"']*\/cash-u-news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)){
-    const label=cleanText(m[2]).toLocaleLowerCase("uk-UA");
-    if(label.includes(monthName)&&/cash.?u\s*club/iu.test(label)){
-      articleUrl=new URL(m[1],root).toString();
-      break;
+  try {
+    const hub=await fetchSenseHtml(root+"/cash-u",headers);
+    const hubHtml=hub.raw;
+    const monthName=SENSE_MONTH_NAMES[new Date().getUTCMonth()];
+    let articleUrl="";
+    for(const m of hubHtml.matchAll(/<a\b[^>]*href=["']([^"']*\/cash-u-news\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/giu)){
+      const label=cleanText(m[2]).toLocaleLowerCase("uk-UA");
+      if(label.includes(monthName)&&/cash.?u\s*club/iu.test(label)){
+        articleUrl=new URL(m[1],root).toString();
+        break;
+      }
     }
+    if(!articleUrl){
+      const slugMatch=hubHtml.match(new RegExp(`href=["']([^"']*\\/cash-u-news\\/[^"']*${monthName}[^"']*)["']`,"iu"));
+      if(slugMatch) articleUrl=new URL(slugMatch[1],root).toString();
+    }
+    if(!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
+    const article=await fetchSenseHtml(articleUrl,headers);
+    const articleHtml=article.raw;
+    if(!/Спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер/iu.test(cleanText(articleHtml))){
+      throw new Error("Sense monthly partner section not found");
+    }
+    return {
+      status:article.status,
+      raw:articleHtml,
+      responseBytes:new TextEncoder().encode(articleHtml).byteLength,
+      documentType:"html",
+      contentType:article.contentType,
+      transport:article.transport==="edge_fetch"?"sense_monthly_article":"sense_monthly_article_db_fallback",
+      resolvedUrl:articleUrl,
+    };
+  } catch(fetchError) {
+    const {data:rows}=await service.from("scanner_snapshots")
+      .select("structured_payload,title,text_excerpt,fetched_at")
+      .eq("source_id","sense-partners-monthly")
+      .is("error",null)
+      .not("structured_payload","is",null)
+      .order("fetched_at",{ascending:false})
+      .limit(1);
+    const prev=rows?.[0];
+    const cached=prev?.structured_payload&&typeof prev.structured_payload==="object"?prev.structured_payload:null;
+    if(!cached || !Array.isArray(cached.items) || cached.items.length<10) throw fetchError;
+    return {
+      status:200,
+      raw:"",
+      responseBytes:0,
+      documentType:"cached_structured",
+      contentType:"application/json",
+      transport:"sense_cached_official_snapshot",
+      resolvedUrl:cached.resolved_source_url||cached.source_url||root+"/cash-u",
+      cachedStructured:cached,
+      cachedTitle:prev.title||"Sense Bank Cash'u Club",
+      cachedExcerpt:prev.text_excerpt||"",
+      cachedFetchedAt:prev.fetched_at||null,
+      fetchWarning:fetchError instanceof Error?fetchError.message:String(fetchError)
+    };
   }
-  if(!articleUrl){
-    const slugMatch=hubHtml.match(new RegExp(`href=["\']([^"\']*\\/cash-u-news\\/[^"\']*${monthName}[^"\']*)["\']`,`iu`));
-    if(slugMatch) articleUrl=new URL(slugMatch[1],root).toString();
-  }
-  if(!articleUrl) throw new Error("Sense current-month Cash'u article link not found");
-  const article=await fetchSenseHtml(articleUrl,headers);
-  const articleHtml=article.raw;
-  if(!/Спеціальн\p{L}*\s+пропозиці\p{L}*\s+від\s+партнер/iu.test(cleanText(articleHtml))){
-    throw new Error("Sense monthly partner section not found");
-  }
-  return {
-    status:article.status,
-    raw:articleHtml,
-    responseBytes:new TextEncoder().encode(articleHtml).byteLength,
-    documentType:"html",
-    contentType:article.contentType,
-    transport:article.transport==="edge_fetch"?"sense_monthly_article":"sense_monthly_article_db_fallback",
-    resolvedUrl:articleUrl,
-  };
 }
 
 async function loadUkrCapitalCapicardSource(sourceUrl:string) {
@@ -2482,7 +2509,26 @@ async function loadSource(source: any) {
     try {
       const loaded=await loadSource(source), raw=loaded.raw, responseBytes=Number(loaded.responseBytes||new TextEncoder().encode(raw).byteLength), isPdf=loaded.documentType==="pdf", accessBlock=isPdf?null:detectAccessBlock(raw);
       let text="", focused="", safeFocused="", pageTitle=isPdf?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null), categoryPool:any[]=[], structured:any, hash:string;
-      if(isPdf){
+      if(loaded.documentType==="cached_structured"){
+        const cached=loaded.cachedStructured&&typeof loaded.cachedStructured==="object"?loaded.cachedStructured:{};
+        structured={
+          ...cached,
+          parser_version:PARSER_VERSION,
+          source_id:source.id,
+          bank:source.bank||cached.bank||null,
+          source_url:source.url,
+          source_role:source.source_role||cached.source_role||"primary",
+          data_mode:source.data_mode||cached.data_mode||"dynamic",
+          publish_policy:source.publish_policy||cached.publish_policy||"review_required",
+          resolved_source_url:loaded.resolvedUrl||cached.resolved_source_url||null,
+          cached_official_snapshot:true,
+          cached_snapshot_fetched_at:loaded.cachedFetchedAt||null,
+          cached_snapshot_warning:loaded.fetchWarning||null
+        };
+        pageTitle=loaded.cachedTitle||source.purpose||source.bank||"Cached official snapshot";
+        safeFocused=safeDbText(loaded.cachedExcerpt||"");
+        hash=oldHash||await sha256(JSON.stringify({source_id:source.id,cached_snapshot_fetched_at:loaded.cachedFetchedAt||null}));
+      }else if(isPdf){
         const {data:previousRows}=await service.from("scanner_snapshots").select("structured_payload,title,text_excerpt").eq("source_id",source.id).not("structured_payload","is",null).order("fetched_at",{ascending:false}).limit(1);
         const previous=previousRows?.[0]||null, cached=previous?.structured_payload&&typeof previous.structured_payload==="object"?previous.structured_payload:null, binaryHash=String(loaded.binaryHash||"");
         if(!binaryHash) throw new Error("PDF fingerprint missing");
