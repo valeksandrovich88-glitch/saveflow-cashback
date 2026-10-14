@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 68;
+const PARSER_VERSION = 69;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -2569,6 +2569,8 @@ async function loadSource(source: any) {
       let text="", focused="", safeFocused="", pageTitle=isPdf?(source.purpose||source.bank||"Official PDF"):(safeDbText(titleFromHtml(raw)||'')||null), categoryPool:any[]=[], structured:any, hash:string;
       let stablePromoPreviousHash:string|null=null;
       let usesStablePromoFingerprint=false;
+      let sourceSemanticPreviousHash:string|null=null;
+      let usesSourceSemanticFingerprint=false;
       if(loaded.documentType==="cached_structured"){
         const cached=loaded.cachedStructured&&typeof loaded.cachedStructured==="object"?loaded.cachedStructured:{};
         structured={
@@ -2683,12 +2685,35 @@ async function loadSource(source: any) {
         structured={...structured,partner_audit:partnerRosterAudit};
       }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      const isInitial=usesStablePromoFingerprint
+      if(source.id==="abank-cashback-rules"&&!structured.unsupported){
+        const semanticState={
+          tax_rate_percent:structured.tax_rate_percent??null,
+          max_cashback_uah:structured?.limits?.max_cashback_uah??null,
+          min_withdrawal_uah:structured?.limits?.min_withdrawal_uah??null,
+          valid_to:structured.valid_to??null
+        };
+        hash=await sha256("abank-rules-v1\n"+JSON.stringify(semanticState));
+        const {data:prevSemanticRows}=await service.from("scanner_snapshots")
+          .select("structured_payload")
+          .eq("source_id",source.id)
+          .is("error",null)
+          .order("fetched_at",{ascending:false})
+          .limit(1);
+        const prevFingerprint=String(prevSemanticRows?.[0]?.structured_payload?.source_semantic_fingerprint||"");
+        sourceSemanticPreviousHash=prevFingerprint||hash;
+        usesSourceSemanticFingerprint=true;
+        structured={...structured,source_semantic_fingerprint:hash,source_semantic_version:1};
+      }
+      const isInitial=usesSourceSemanticFingerprint
+        ? false
+        : usesStablePromoFingerprint
         ? !stablePromoPreviousHash
         : (!oldHash||sourceFingerprintVersion!==FINGERPRINT_VERSION);
-      const isChanged=usesStablePromoFingerprint
-        ? (!!stablePromoPreviousHash&&stablePromoPreviousHash!==hash&&!structured.unsupported)
-        : (!isInitial&&oldHash!==hash&&!structured.unsupported);
+      const isChanged=usesSourceSemanticFingerprint
+        ? (!!sourceSemanticPreviousHash&&sourceSemanticPreviousHash!==hash&&!structured.unsupported)
+        : usesStablePromoFingerprint
+          ? (!!stablePromoPreviousHash&&stablePromoPreviousHash!==hash&&!structured.unsupported)
+          : (!isInitial&&oldHash!==hash&&!structured.unsupported);
       const {error:snapshotError}=await service.from("scanner_snapshots").insert({ run_id:run.id, source_id:source.id, http_status:loaded.status, content_hash:hash, response_bytes:responseBytes, title:pageTitle, text_excerpt:structured.unsupported?"":safeFocused.slice(0,8000), error:null, parser_version:PARSER_VERSION, structured_payload:structured }); if(snapshotError) throw new Error("Snapshot insert failed: "+snapshotError.message);
       await service.from("scanner_sources").update({ last_checked_at:new Date().toISOString(), last_http_status:loaded.status, last_hash:hash, last_error:null, fingerprint_version:FINGERPRINT_VERSION }).eq("id",source.id);
       // Refresh existing pending evidence after parser upgrades without creating duplicate tasks.
