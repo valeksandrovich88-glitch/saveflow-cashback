@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 63;
+const PARSER_VERSION = 64;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -727,6 +727,63 @@ function normalizeMonobankRulesStructured(text,structured) {
     partner_definition_mode:"merchant",
     current_category_rates_change_monthly:true,
     confidence:"rules_only"
+  };
+}
+
+function normalizeMtbRuhStructured(text,structured) {
+  const raw=String(text||"");
+  const hasRate=/АЗС\s+та\s+медицин\p{L}*\s*[-–—:]?\s*2\s*%/iu.test(raw);
+  const credit=/кредитн\p{L}*\s+кошт/iu.test(raw);
+  const max=raw.match(/максимальн\p{L}*[^\n]{0,120}?500\s*грн/iu);
+  const min=raw.match(/мінімальн\p{L}*[^\n]{0,120}?10\s*грн/iu);
+  const conditions=[
+    "Кредитна картка «Рух».",
+    credit?"Кешбек нараховується за безготівкові покупки кредитними коштами.":null,
+    max?"Максимальне повернення — 500 грн на місяць.":null,
+    min?"Мінімальна сума повернення — 10 грн на місяць.":null
+  ].filter(Boolean);
+  const items:any[]=[];
+  if(hasRate){
+    for(const category of ["АЗС","Аптеки / здоров'я"]){
+      items.push({
+        kind:"category",name:category,category,partner:null,
+        rate_percent:2,rate_text:"2%",current_value:"2%",
+        valid_from:null,valid_to:null,
+        evidence:["Послуга Cash Back — АЗС та медицина — 2%."],
+        conditions
+      });
+    }
+  }
+  return {
+    ...structured,items,item_count:items.length,rates_percent:hasRate?[2]:[],
+    limits:{...(structured?.limits||{}),max_cashback_uah:max?500:null,min_cashback_uah:min?10:null},
+    confidence:hasRate?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:hasRate,current_product:"Кредитна картка «Рух»"
+  };
+}
+
+function normalizeMtbCitizenCardStructured(text,structured) {
+  const raw=String(text||"");
+  const medicine=/Аптек\p{L}*\s+та\s+медицин\p{L}*\s*[-–—:]?\s*5\s*%/iu.test(raw);
+  const cafe=/(?:Фаст[- ]?фуд|їдальн\p{L}*|ресторан\p{L}*|кав.?ярн\p{L}*)[^\n]{0,160}?5\s*%/iu.test(raw);
+  const groceries=/продукт\p{L}*[^\n]{0,120}?2\s*%/iu.test(raw);
+  const items:any[]=[];
+  const add=(category,rate,evidence)=>{
+    items.push({
+      kind:"category",name:category,category,partner:null,
+      rate_percent:rate,rate_text:`${rate}%`,current_value:`${rate}%`,
+      valid_from:null,valid_to:null,evidence:[evidence],
+      conditions:["Муніципальна «Картка черкасця» від МТБ БАНК."]
+    });
+  };
+  if(medicine)add("Аптеки / здоров'я",5,"Аптеки та медицина — 5%.");
+  if(cafe)add("Кафе та ресторани",5,"Фастфуд, їдальні, ресторани та кав'ярні — 5%.");
+  if(groceries)add("Продукти",2,"Продукти — 2%.");
+  return {
+    ...structured,items,item_count:items.length,
+    rates_percent:[...new Set(items.map(x=>x.rate_percent))].sort((a,b)=>b-a),
+    confidence:items.length===3?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:items.length===3,current_product:"Картка черкасця"
   };
 }
 
@@ -2246,6 +2303,8 @@ async function loadSource(source: any) {
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
         if(source.id==="alliance-startova") structured=normalizeAllianceStartovaStructured(text,structured);
         if(source.id==="piraeus-wincard-cashback") structured=normalizePiraeusWinCardStructured(text,structured);
+        if(source.id==="mtb-ruh-cashback") structured=normalizeMtbRuhStructured(text,structured);
+        if(source.id==="mtb-citizen-card-cashback") structured=normalizeMtbCitizenCardStructured(text,structured);
         if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
         if(source.id==="monobank-cashback-rules") structured=normalizeMonobankRulesStructured(text,structured);
         if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
