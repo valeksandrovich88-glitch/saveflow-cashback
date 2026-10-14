@@ -12,19 +12,8 @@
     'GlobusPlus':new Set(["Аптеки / здоров'я",'Ігри та додатки','Кафе та ресторани','Краса','Продукти','Спорт та фітнес','Транспорт']),
     'monobank':new Set(['Кафе та ресторани','Квіти','Кіно та театри','Маркетплейси','Продукти','Розваги','Таксі'])
   };
+  const OVERRIDE_KEY='saveflow.matrixOverrides.v1';
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
-
-  const st=document.createElement('style');
-  st.id='sf-official-dynamic-matrix-v60';
-  st.textContent=`
-    .cash.sf-official-dynamic{background:rgba(235,243,236,.66)!important;color:#425549!important}
-    .cash.sf-official-dynamic .cash-value{font-size:10px!important;font-weight:800!important;line-height:1.15!important;white-space:nowrap!important}
-    .cash.sf-official-dynamic::after{content:'динамічно';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.02em;color:#718077;text-transform:uppercase}
-    .cash.sf-official-unverified{background:rgba(245,247,245,.72)!important;color:#8a938d!important}
-    .cash.sf-official-unverified .cash-value{font-size:12px!important;font-weight:800!important;line-height:1.15!important}
-    .cash.sf-official-unverified::after{content:'не підтверджено';display:block;margin-top:4px;font-size:7px;font-weight:750;letter-spacing:.01em;color:#929a95;text-transform:uppercase}
-  `;
-  document.head.appendChild(st);
 
   function bankNameFromHead(th){
     return norm(th?.querySelector('.bank-name')?.textContent||th?.textContent||'');
@@ -33,51 +22,35 @@
     const first=tr?.querySelector('td:first-child');
     return norm(first?.querySelector('strong')?.textContent||first?.textContent||'');
   }
-  function patchCell(td){
-    if(!td)return false;
-    let cash=td.querySelector('.cash');
-    if(!cash){
-      cash=document.createElement('div');
-      cash.className='cash';
-      td.innerHTML='';
-      td.appendChild(cash);
-    }
-    cash.classList.remove('best');
-    cash.classList.add('sf-official-dynamic');
-    let value=cash.querySelector('.cash-value');
-    if(!value){
-      value=document.createElement('span');
-      value.className='cash-value';
-      cash.replaceChildren(value);
-    }
-    value.textContent='у застосунку';
-    cash.title='Категорія підтверджена офіційним джерелом. Поточна ставка є динамічною та відображається у застосунку банку.';
-    td.dataset.sfOfficialDynamic='1';
-    td.dataset.sfOfficialUnverified='';
-    return true;
+  function overrides(){
+    try{
+      const data=JSON.parse(localStorage.getItem(OVERRIDE_KEY)||'{}');
+      return data&&typeof data==='object'?data:{};
+    }catch(_){return {};}
   }
-  function patchUnverifiedCell(td,bank){
-    if(!td)return false;
-    let cash=td.querySelector('.cash');
-    if(!cash){
-      cash=document.createElement('div');
-      cash.className='cash';
-      td.innerHTML='';
-      td.appendChild(cash);
+  function hasManualOverride(bank,category){
+    const p=overrides()[`${category}|||${bank}`];
+    return !!(p&&typeof p==='object');
+  }
+  function clearPlaceholderState(td){
+    if(!td)return;
+    const cash=td.querySelector('.cash');
+    cash?.classList.remove('sf-official-dynamic','sf-official-unverified');
+    if(cash && /^(у застосунку|—)$/i.test(norm(cash.querySelector('.cash-value')?.textContent||cash.textContent||''))){
+      cash.title='';
     }
-    cash.classList.remove('best','sf-official-dynamic');
-    cash.classList.add('sf-official-unverified');
-    let value=cash.querySelector('.cash-value');
-    if(!value){
-      value=document.createElement('span');
-      value.className='cash-value';
-      cash.replaceChildren(value);
-    }
-    value.textContent='—';
-    cash.title=`У поточному офіційному джерелі ${bank||'банку'} ця категорія не підтверджена. Стара ставка не показується.`;
     td.dataset.sfOfficialDynamic='';
-    td.dataset.sfOfficialUnverified='1';
-    return true;
+    td.dataset.sfOfficialUnverified='';
+  }
+  function neutralCell(td,status,bank){
+    if(!td)return false;
+    const alreadyPlain=norm(td.textContent)==='—' && !td.querySelector('.cash');
+    if(!alreadyPlain) td.replaceChildren(document.createTextNode('—'));
+    td.removeAttribute('title');
+    td.dataset.sfOfficialDynamic=status==='dynamic'?'1':'';
+    td.dataset.sfOfficialUnverified=status==='unverified'?'1':'';
+    td.dataset.sfOfficialBank=bank||'';
+    return !alreadyPlain;
   }
   function recalcBest(row){
     const cells=[...row.querySelectorAll('td')].slice(1);
@@ -105,18 +78,32 @@
       if(RULES[name]||UNVERIFIED[name])bankCols.set(i,name);
     });
     if(!bankCols.size)return;
+
     [...table.querySelectorAll('tbody tr')].forEach(tr=>{
       const cat=categoryFromRow(tr);
       if(!cat)return;
       const cells=[...tr.children];
-      let changed=false;
+      let touched=false;
       for(const [idx,bank] of bankCols){
-        if(RULES[bank]?.has(cat)) changed=patchCell(cells[idx])||changed;
-        else if(UNVERIFIED[bank]?.has(cat)) changed=patchUnverifiedCell(cells[idx],bank)||changed;
+        const td=cells[idx];
+        const status=RULES[bank]?.has(cat)?'dynamic':(UNVERIFIED[bank]?.has(cat)?'unverified':'');
+        if(!status)continue;
+
+        // A value explicitly entered through Admin mode always wins.
+        if(hasManualOverride(bank,cat)){
+          clearPlaceholderState(td);
+          touched=true;
+          continue;
+        }
+
+        // Public matrix stays clean: uncertainty/dynamic status is explained by
+        // the matrix legend/badges instead of text cards inside individual cells.
+        touched=neutralCell(td,status,bank)||touched;
       }
-      if(changed)recalcBest(tr);
+      if(touched)recalcBest(tr);
     });
   }
+
   run();
   let queued=false;
   new MutationObserver(()=>{
@@ -124,4 +111,8 @@
     queued=true;
     requestAnimationFrame(()=>{queued=false;run()});
   }).observe(document.body,{subtree:true,childList:true,characterData:true});
+  window.addEventListener('storage',e=>{
+    if(e.key===OVERRIDE_KEY)queueMicrotask(run);
+  });
+  window.addEventListener('saveflow-auth-change',()=>queueMicrotask(run));
 })();
