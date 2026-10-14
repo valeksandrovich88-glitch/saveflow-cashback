@@ -156,6 +156,15 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
+function normalizeUkrsibFixedPromoWindow(text,structured) {
+  const raw=String(text||"");
+  const m=raw.match(/(?:^|\n)\s*з\s+(\d{1,2}[./-]\d{1,2}[./-]20\d{2})\s+до\s+(\d{1,2}[./-]\d{1,2}[./-]20\d{2})/iu);
+  if(!m)return structured;
+  const from=parseIsoNumericDate(m[1]),to=parseIsoNumericDate(m[2]);
+  if(!from||!to)return structured;
+  return {...structured,valid_from:from,valid_to:to,validity_source:"ukrsib_primary_campaign_period"};
+}
+
 function extractPrimaryPromoWindow(text, title) {
   const raw=String(text||"");
   const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim();
@@ -2585,6 +2594,9 @@ async function loadSource(source: any) {
         if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
+        if(["ukrsib-citrus-2026","ukrsib-galtrans-2026","ukrsib-maudau-2026"].includes(source.id)){
+          structured=normalizeUkrsibFixedPromoWindow(text,structured);
+        }
         if(source.parser_profile==="promos"&&source.data_mode==="fixed"&&!structured.unsupported){
           const promoWindow=extractPrimaryPromoWindow(text,pageTitle);
           if(promoWindow.valid_from||promoWindow.valid_to){
