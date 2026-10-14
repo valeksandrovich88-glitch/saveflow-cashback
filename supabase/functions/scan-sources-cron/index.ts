@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 65;
+const PARSER_VERSION = 66;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -383,7 +383,57 @@ function mergePumbPartnerRoster(structured, rawHtml) {
     item_count: merged.length,
     partner_roster_count: roster.length,
     partner_roster_source: "official_embedded_partnersList",
+    partner_roster_complete:false,
+    partner_roster_note:"Embedded partnersList is treated as a discovery list only. Current-month removals/rates are audited against the dated monthly PUMB article.",
     confidence: roster.length >= 20 ? "review_ready" : (structured?.confidence || "signal_only")
+  };
+}
+
+function extractPumbMonthlyPartnerRoster(text) {
+  const lines=String(text||"").split(/\n+/).map(compactLabel).filter(Boolean);
+  const start=lines.findIndex(x=>/Підключайте\s+партнерський\s+кешбек\s+у\s+ПУМБ\s+у\s+жовтні/iu.test(x));
+  if(start<0)return [];
+  const month=currentMonthWindow();
+  const map=new Map();
+  for(let i=start+1;i<lines.length;i++){
+    const line=lines[i];
+    if(/^Деякі\s+пропозиції\s+є\s+персоналізованими/iu.test(line))break;
+    const m=line.match(/^(.{2,100}?)\s*(?:[-–—]\s*)?(до\s+)?(\d{1,3}(?:[.,]\d+)?)\s*%\s+(.+)$/iu);
+    if(!m)continue;
+    const name=compactLabel(m[1]).replace(/[«»"]/g,"").trim();
+    const rate=parseRateNumber(m[3]);
+    if(!name||rate===null)continue;
+    const key=partnerRosterKey(name);
+    if(!key)continue;
+    const currentValue=(m[2]?"до ":"")+String(rate).replace(".",",")+"%";
+    const item={
+      kind:"partner",name,partner:name,category:null,
+      rate_percent:rate,rate_text:currentValue,current_value:currentValue,
+      valid_from:month.valid_from,valid_to:month.valid_to,
+      evidence:[line.slice(0,500)],conditions:[compactLabel(m[4]).slice(0,500)]
+    };
+    const prev=map.get(key);
+    if(!prev || Number(item.rate_percent)>Number(prev.rate_percent) || (m[2]&&!String(prev.current_value||"").startsWith("до "))){
+      map.set(key,item);
+    }
+  }
+  return [...map.values()];
+}
+
+function normalizePumbMonthlyStructured(text,structured){
+  const roster=extractPumbMonthlyPartnerRoster(text);
+  const month=currentMonthWindow();
+  return {
+    ...structured,
+    items:roster,
+    item_count:roster.length,
+    rates_percent:uniqNumbers(roster.map(x=>x.rate_percent).filter(x=>x!==null)),
+    valid_from:month.valid_from,
+    valid_to:month.valid_to,
+    partner_roster_count:roster.length,
+    partner_roster_source:"official_monthly_pumb_article",
+    partner_roster_complete:true,
+    confidence:roster.length>=100?"review_ready":"signal_only"
   };
 }
 
@@ -2419,6 +2469,7 @@ async function loadSource(source: any) {
         text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
         if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
+        if(source.id==="pumb-partners-monthly") structured=normalizePumbMonthlyStructured(text,structured);
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
@@ -2464,7 +2515,7 @@ async function loadSource(source: any) {
       if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-cashback"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null)))));
+      const partnerAuditBank=source.id==="pumb-partners-monthly"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null)))));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
