@@ -2948,7 +2948,7 @@ async function loadSource(source: any) {
         ],
         auto_publish:false
       };
-      const conflictHash=await sha256(JSON.stringify(review));
+      const conflictHash=await sha256(JSON.stringify({...review,detected_on:null}));
       const {data:existing}=await service.from("scanner_candidates").select("id")
         .eq("source_id","izibank-market").eq("candidate_type","official_overview_mismatch")
         .eq("new_hash",conflictHash).limit(1);
@@ -3007,7 +3007,7 @@ async function loadSource(source: any) {
         ],
         auto_publish:false
       };
-      const conflictHash=await sha256(JSON.stringify(review));
+      const conflictHash=await sha256(JSON.stringify({...review,detected_on:null}));
       const {data:existing}=await service.from("scanner_candidates").select("id")
         .eq("source_id","abank-cashback-rules").eq("candidate_type","official_overview_mismatch")
         .eq("new_hash",conflictHash).limit(1);
