@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 72;
+const PARSER_VERSION = 73;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -150,14 +150,8 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
-function fixedPromoSemanticText(focused,title,structured) {
-  const raw=String(focused||"");
-  const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim();
-  const lowRaw=raw.toLocaleLowerCase("uk-UA");
-  const lowTitle=titleBase.toLocaleLowerCase("uk-UA");
-  let start=lowTitle.length>=8?lowRaw.indexOf(lowTitle):-1;
-  if(start<0)start=0;
-  let segment=raw.slice(start);
+function fixedPromoSemanticText(focused) {
+  let segment=String(focused||"");
   const markers=[
     /\n\s*Інші\s+акції\b/iu,
     /\n\s*Інші\s+пропозиції\b/iu,
@@ -171,17 +165,11 @@ function fixedPromoSemanticText(focused,title,structured) {
     const m=re.exec(segment);
     if(m&&m.index>100)cut=Math.min(cut,m.index);
   }
-  const core=segment.slice(0,cut)
+  return segment.slice(0,cut)
     .replace(/&(?:#0*38|amp);/giu,"&")
     .replace(/[ \t]+/g," ")
     .replace(/\n{2,}/g,"\n")
     .trim();
-  return JSON.stringify({
-    title:titleBase,
-    valid_from:structured?.valid_from||null,
-    valid_to:structured?.valid_to||null,
-    core:core.slice(0,7000)
-  });
 }
 
 function normalizeUkrsibFixedPromoWindow(text,structured) {
@@ -2625,8 +2613,8 @@ async function loadSource(source: any) {
         const stablePromo=source.source_role==="primary"&&source.parser_profile==="promos"&&source.data_mode==="fixed"&&!accessBlock&&!structured.unsupported;
         if(stablePromo){
           usesStablePromoFingerprint=true;
-          const semantic=fixedPromoSemanticText(safeFocused,pageTitle,structured);
-          hash=await sha256("fixed-promo-v3\n"+semantic);
+          const semantic=fixedPromoSemanticText(safeFocused);
+          hash=await sha256("fixed-promo-v4\n"+semantic);
           const {data:prevPromoRows}=await service.from("scanner_snapshots")
             .select("structured_payload")
             .eq("source_id",source.id)
@@ -2637,8 +2625,8 @@ async function loadSource(source: any) {
           const prevFingerprint=String(prevPayload?.promo_semantic_fingerprint||"");
           const prevVersion=Number(prevPayload?.promo_semantic_version||0);
           // A fingerprint-version migration is a baseline, not a bank change.
-          stablePromoPreviousHash=prevVersion===3&&prevFingerprint?prevFingerprint:hash;
-          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:3};
+          stablePromoPreviousHash=prevVersion===4&&prevFingerprint?prevFingerprint:hash;
+          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:4};
         }else{
           hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
         }
