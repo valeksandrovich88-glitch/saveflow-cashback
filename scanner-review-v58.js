@@ -196,11 +196,19 @@
     const run=state.runs[0]||{};
     const pending=state.candidates.filter(x=>x.status==='pending');
     const high=pending.filter(x=>x.priority==='high').length;
-    const expired=pending.filter(x=>x.candidate_type==='official_source_expired').length;
+    const now=Date.now();
+    const manualDue=Object.values(state.sources).filter(src=>{
+      if(src.enabled===false||src.source_role!=='primary'||src.publish_policy!=='manual_only')return false;
+      if(!src.manual_reviewed_at)return true;
+      const ts=new Date(src.manual_reviewed_at).getTime();
+      if(Number.isNaN(ts))return true;
+      const interval=Math.max(7,Number(src.manual_review_interval_days||35))*86400000;
+      return now-ts>=interval;
+    }).length;
     document.getElementById('sfScanSummary').innerHTML=`
       <div class="sf-scan-stat"><b>${pending.length}</b><span>чекають перевірки</span></div>
       <div class="sf-scan-stat"><b>${high}</b><span>високий пріоритет</span></div>
-      <div class="sf-scan-stat"><b>${expired}</b><span>завершені пропозиції</span></div>
+      <div class="sf-scan-stat"><b>${manualDue}</b><span>ручні до перевірки</span></div>
       <div class="sf-scan-stat"><b>${run.failed_sources??0}</b><span>помилки останнього скану</span></div>`;
     const rl=document.getElementById('sfScanRunline');
     if(rl) rl.textContent=run.started_at?`Останній скан: ${fmtDate(run.started_at)} · ${run.status||'—'} · джерел ${run.total_sources??'—'} · змін ${run.changed_sources??0}`:'Сканів ще немає.';
