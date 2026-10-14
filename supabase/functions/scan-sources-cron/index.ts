@@ -2726,7 +2726,13 @@ async function loadSource(source: any) {
   }
 
   const list=sources||[];
-  for (let i=0;i<list.length;i+=6) await Promise.all(list.slice(i,i+6).map(scanOne));
+  // Keep peak memory bounded: several sources parse large HTML/PDF payloads.
+  // Three concurrent sources is fast enough for the monthly scan without
+  // stacking six large parser workloads inside one Edge worker.
+  const SCAN_CONCURRENCY=3;
+  for (let i=0;i<list.length;i+=SCAN_CONCURRENCY) {
+    await Promise.all(list.slice(i,i+SCAN_CONCURRENCY).map(scanOne));
+  }
 
   // Cross-check official izibank pages. Public merchant rates remain app-only,
   // but the two official landing pages should not advertise conflicting caps.
