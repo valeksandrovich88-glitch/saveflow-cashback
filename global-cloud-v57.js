@@ -17,8 +17,30 @@
   function isAdmin(){return cloud()?.profile?.role==='admin' && !!cloud()?.session?.user;}
   function userId(){return cloud()?.session?.user?.id||null;}
   function parse(key,fallback){try{const x=JSON.parse(localStorage.getItem(key)||'');return x??fallback;}catch(_){return fallback;}}
-  function blankCards(){return {custom:{},overrides:{},hidden:[]};}
-  function cardStore(key){const x=parse(key,null);return {custom:x?.custom&&typeof x.custom==='object'?x.custom:{},overrides:x?.overrides&&typeof x.overrides==='object'?x.overrides:{},hidden:Array.isArray(x?.hidden)?x.hidden:[]};}
+  function localDateKey(d=new Date()){
+    return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+  }
+  function promoEnd(payload){
+    const end=String(payload?.end||'').trim();
+    return /^20\d{2}-\d{2}-\d{2}$/.test(end)?end:null;
+  }
+  function isPromoExpired(payload){
+    const end=promoEnd(payload);
+    return !!end && end<localDateKey();
+  }
+  function showExpiredPromos(){
+    return isAdmin() && !!document.body?.classList.contains('site-editing');
+  }
+  function blankCards(){return {custom:{},overrides:{},hidden:[],expired:{}};}
+  function cardStore(key){
+    const x=parse(key,null);
+    return {
+      custom:x?.custom&&typeof x.custom==='object'?x.custom:{},
+      overrides:x?.overrides&&typeof x.overrides==='object'?x.overrides:{},
+      hidden:Array.isArray(x?.hidden)?x.hidden:[],
+      expired:x?.expired&&typeof x.expired==='object'?x.expired:{}
+    };
+  }
   function nativeWrite(key,value){applyingCloud=true;try{nativeSet.call(localStorage,key,JSON.stringify(value));}finally{applyingCloud=false;}}
   function nativeDelete(key){applyingCloud=true;try{nativeRemove.call(localStorage,key);}finally{applyingCloud=false;}}
 
@@ -85,6 +107,18 @@
     Object.entries(s.custom).forEach(([base_id,payload])=>rows.push({block,base_id,payload:{...payload,__kind:'custom'},hidden:false,updated_by:uid,updated_at:now}));
     Object.entries(s.overrides).forEach(([base_id,payload])=>rows.push({block,base_id,payload:{...payload,__kind:'override'},hidden:false,source_url:payload?.source||null,updated_by:uid,updated_at:now}));
     s.hidden.forEach(base_id=>rows.push({block,base_id,payload:{__kind:'hidden'},hidden:true,updated_by:uid,updated_at:now}));
+    if(block==='promo'){
+      const used=new Set([...Object.keys(s.custom),...Object.keys(s.overrides),...s.hidden]);
+      Object.entries(s.expired||{}).forEach(([base_id,entry])=>{
+        if(used.has(base_id))return;
+        const kind=entry?.kind==='override'?'override':'custom';
+        const payload=entry?.payload&&typeof entry.payload==='object'?entry.payload:{};
+        rows.push({
+          block,base_id,payload:{...payload,__kind:kind},hidden:false,
+          source_url:payload?.source||null,updated_by:uid,updated_at:now
+        });
+      });
+    }
     if(block==='bonus'){
       const refs=parse(KEYS.bonusLinks,{});
       Object.entries(refs||{}).forEach(([id,ref])=>rows.push({block,base_id:`__ref__:${id}`,payload:{__kind:'referral',...(ref||{})},hidden:false,updated_by:uid,updated_at:now}));
@@ -123,7 +157,7 @@
     const m=parse(KEYS.matrix,{});
     if(m&&Object.keys(m).length)return true;
     for(const k of [KEYS.partner,KEYS.promo,KEYS.bonus]){
-      const s=cardStore(k);if(Object.keys(s.custom).length||Object.keys(s.overrides).length||s.hidden.length)return true;
+      const s=cardStore(k);if(Object.keys(s.custom).length||Object.keys(s.overrides).length||s.hidden.length||Object.keys(s.expired||{}).length)return true;
     }
     const refs=parse(KEYS.bonusLinks,{});return !!Object.keys(refs||{}).length;
   }
@@ -144,10 +178,13 @@
       if(kind==='referral'){
         const id=String(r.base_id||'').replace(/^__ref__:/,'');
         if(id)refs[id]={url:p.url||'',label:p.label||'Отримати бонус',updatedAt:p.updatedAt||r.updated_at};
-      }else if(kind==='custom'){
-        const q={...p};delete q.__kind;s.custom[r.base_id]=q;
       }else if(kind==='hidden'||r.hidden){
         if(r.base_id&&!String(r.base_id).startsWith('__ref__:'))s.hidden.push(r.base_id);
+      }else if(block==='promo'&&!showExpiredPromos()&&isPromoExpired(p)){
+        const q={...p};delete q.__kind;
+        s.expired[r.base_id]={kind:kind==='custom'?'custom':'override',payload:q};
+      }else if(kind==='custom'){
+        const q={...p};delete q.__kind;s.custom[r.base_id]=q;
       }else{
         const q={...p};delete q.__kind;s.overrides[r.base_id]=q;
       }
@@ -188,10 +225,38 @@
     finally{pullInFlight=false;}
   }
 
-  window.saveflowGlobalCloud={pull:pullGlobal,syncMatrix,syncBlock,bootstrap:bootstrapLocalToCloud};
+  window.saveflowGlobalCloud={
+    pull:pullGlobal,syncMatrix,syncBlock,bootstrap:bootstrapLocalToCloud,
+    promoRollover:{
+      isExpired:isPromoExpired,
+      today:()=>localDateKey(),
+      expiredCount:()=>Object.keys(cardStore(KEYS.promo).expired||{}).length
+    }
+  };
+
+  let lastExpiredVisibility=showExpiredPromos();
+  const editModeObserver=new MutationObserver(()=>{
+    const next=showExpiredPromos();
+    if(next===lastExpiredVisibility)return;
+    lastExpiredVisibility=next;
+    setTimeout(pullGlobal,0);
+  });
+  if(document.body) editModeObserver.observe(document.body,{attributes:true,attributeFilter:['class']});
+
+  let rolloverTimer=null;
+  function scheduleMidnightRollover(){
+    clearTimeout(rolloverTimer);
+    const now=new Date();
+    const next=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1,0,0,2,0);
+    rolloverTimer=setTimeout(()=>{
+      pullGlobal().catch?.(console.warn);
+      scheduleMidnightRollover();
+    },Math.max(1000,next.getTime()-now.getTime()));
+  }
 
   window.addEventListener('saveflow-auth-change',()=>setTimeout(pullGlobal,0));
   setTimeout(pullGlobal,600);
+  scheduleMidnightRollover();
 
 
   function tidyCloudLabels(){
