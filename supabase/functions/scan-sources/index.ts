@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 66;
+const PARSER_VERSION = 67;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -156,6 +156,30 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
+function extractPrimaryPromoWindow(text, title) {
+  const raw=String(text||"");
+  const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim();
+  const lowRaw=raw.toLocaleLowerCase("uk-UA");
+  const lowTitle=titleBase.toLocaleLowerCase("uk-UA");
+  const idx=lowTitle.length>=8?lowRaw.indexOf(lowTitle):-1;
+  const segment=(idx>=0?raw.slice(idx,idx+2200):raw.slice(0,4200));
+  const parsed=extractWindow(segment);
+  if(parsed?.valid_to)return parsed;
+
+  const numeric=segment.match(/(?:з\s+)?(\d{1,2}[./-]\d{1,2}[./-]20\d{2})\s*(?:р(?:оку)?\.?\s*)?(?:по|до|–|—|-)\s*(\d{1,2}[./-]\d{1,2}[./-]20\d{2})/iu);
+  if(numeric){
+    const a=parseIsoNumericDate(numeric[1]),b=parseIsoNumericDate(numeric[2]);
+    if(a&&b)return {valid_from:a,valid_to:b};
+  }
+  const words=segment.match(/(?:з\s+)?(\d{1,2}\s+(?:січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)(?:\s+20\d{2})?)\s*(?:року\s*)?(?:по|до|–|—|-)\s*(\d{1,2}\s+(?:січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)\s+20\d{2})/iu);
+  if(words){
+    const b=parseUaDate(words[2]);
+    const a=parseUaDate(words[1],b?Number(b.slice(0,4)):undefined);
+    if(a&&b)return {valid_from:a,valid_to:b};
+  }
+  return {valid_from:null,valid_to:null};
+}
+
 function labelLooksLikeCategory(s) {
   const x = compactLabel(s);
   if (x.length < 3 || x.length > 90) return false;
@@ -2515,6 +2539,16 @@ async function loadSource(source: any) {
         if(source.id==="crystalbank-cashback-card") structured=normalizeCrystalbankCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
+        if(source.parser_profile==="promos"&&source.data_mode==="fixed"&&!structured.unsupported){
+          const promoWindow=extractPrimaryPromoWindow(text,pageTitle);
+          if(promoWindow.valid_from||promoWindow.valid_to){
+            structured={...structured,
+              valid_from:promoWindow.valid_from||structured.valid_from||null,
+              valid_to:promoWindow.valid_to||structured.valid_to||null,
+              validity_source:"primary_promo_page"
+            };
+          }
+        }
         hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
@@ -2604,6 +2638,58 @@ async function loadSource(source: any) {
           reviewed_at:new Date().toISOString(),
           updated_at:new Date().toISOString()
         }).eq("source_id",source.id).eq("status","pending").in("candidate_type",monthlyCandidateTypes);
+      }
+      if (!candidate && source.source_role==="primary" && source.parser_profile==="promos" && source.data_mode==="fixed" && source.publish_policy==="review_required" && !structured.unsupported && /^20\d{2}-\d{2}-\d{2}$/.test(String(structured.valid_to||""))) {
+        const today=new Date().toISOString().slice(0,10);
+        const newEnd=String(structured.valid_to);
+        const {data:promoRows}=await service.from("global_content_items")
+          .select("base_id,payload,source_url,hidden")
+          .eq("block","promo")
+          .eq("source_url",source.url)
+          .eq("hidden",false);
+        const extensions:any[]=[];
+        for(const row of promoRows||[]){
+          const p=row?.payload&&typeof row.payload==="object"?{...row.payload}:{};
+          const oldEnd=String(p.end||"");
+          if(!/^20\d{2}-\d{2}-\d{2}$/.test(oldEnd))continue;
+          if(newEnd>oldEnd){
+            const guarded={...p,
+              rollover_guard_until:newEnd,
+              rollover_guard_source:source.url,
+              rollover_guard_detected_on:today
+            };
+            await service.from("global_content_items").update({payload:guarded,updated_at:new Date().toISOString()})
+              .eq("block","promo").eq("base_id",row.base_id);
+            extensions.push({base_id:row.base_id,old_end:oldEnd,new_end:newEnd,product:p.product||p.title||row.base_id});
+          }else if(p.rollover_guard_source===source.url){
+            delete p.rollover_guard_until;
+            delete p.rollover_guard_source;
+            delete p.rollover_guard_detected_on;
+            await service.from("global_content_items").update({payload:p,updated_at:new Date().toISOString()})
+              .eq("block","promo").eq("base_id",row.base_id);
+          }
+        }
+        if(extensions.length){
+          const review={kind:"promo_validity_extended",detected_on:today,source_url:source.url,extensions,auto_publish:false,rollover_guard:true};
+          const extensionHash=await sha256(JSON.stringify(review));
+          const {data:existingExtension}=await service.from("scanner_candidates").select("id")
+            .eq("source_id",source.id).eq("candidate_type","promo_validity_extended").eq("new_hash",extensionHash).limit(1);
+          if(!existingExtension?.length){
+            const {data:extensionCandidate,error:extensionError}=await service.from("scanner_candidates").insert({
+              run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:"promo_validity_extended",
+              priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:extensionHash,affected_cells:[],
+              excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,
+              structured_payload:{...structured,promo_extension_review:review},status:"pending"
+            }).select("id,candidate_type,priority").single();
+            if(!extensionError&&extensionCandidate){candidate=extensionCandidate;candidates++;}
+          }
+        }else{
+          await service.from("scanner_candidates").update({
+            status:"reviewed",
+            review_note:"Автоматично закрито: офіційна дата завершення більше не є пізнішою за дату картки SaveFlow.",
+            reviewed_at:new Date().toISOString(),updated_at:new Date().toISOString()
+          }).eq("source_id",source.id).eq("candidate_type","promo_validity_extended").eq("status","pending");
+        }
       }
       if (isChanged && !candidate) {
         changed++;
