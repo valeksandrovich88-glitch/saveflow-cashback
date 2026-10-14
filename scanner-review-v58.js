@@ -2,7 +2,7 @@
   const ID='saveflowScannerReviewV58';
   if(document.getElementById(ID)) return;
 
-  const state={open:false,tab:'pending',busy:false,candidates:[],sources:{},runs:[],snapshots:[],latestSnapshots:{}};
+  const state={open:false,tab:'pending',busy:false,candidates:[],sources:{},runs:[],snapshots:[],latestSnapshots:{},promos:[]};
   const esc=(s)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmtDate=(s)=>{
     if(!s)return '—';
@@ -245,10 +245,24 @@
         const d=new Date(String(date)+'T00:00:00');
         if(Number.isNaN(d.getTime()))return;
         const key=`${date}|${name}`; if(seen.has(key))return; seen.add(key);
-        entries.push({source_id:src.id,bank:src.bank||src.publisher||src.id,name:name||src.purpose||'Пропозиція',date:String(date),ts:d.getTime()});
+        entries.push({source_id:src.id,bank:src.bank||src.publisher||src.id,name:name||src.purpose||'Пропозиція',date:String(date),ts:d.getTime(),kind:'source'});
       };
       add(src.purpose||'Джерело',p.valid_to);
       (Array.isArray(p.items)?p.items:[]).forEach(item=>add(item.name||item.category||item.partner||src.purpose,item.valid_to));
+    }
+    for(const row of state.promos||[]){
+      if(row?.hidden)continue;
+      const p=row?.payload||{};
+      const date=String(p.end||'').trim();
+      if(!/^20\d{2}-\d{2}-\d{2}$/.test(date))continue;
+      const d=new Date(date+'T00:00:00');
+      if(Number.isNaN(d.getTime()))continue;
+      entries.push({
+        source_id:'cloud:'+String(row.base_id||''),
+        bank:p.bank||'SaveFlow',
+        name:p.product||p.title||row.base_id||'Спецпропозиція',
+        date,ts:d.getTime(),kind:'cloud_promo'
+      });
     }
     entries.sort((a,b)=>a.ts-b.ts);
     const roll=document.getElementById('sfScanRollover');
@@ -257,8 +271,10 @@
       const rows=shown.map(x=>{
         const days=Math.ceil((x.ts-now.getTime())/86400000);
         const cls=days<0?'expired':days<=14?'soon':'';
-        const suffix=days<0?`прострочено ${Math.abs(days)} дн.`:days===0?'закінчується сьогодні':`через ${days} дн.`;
-        return `<div class="sf-rollover-item ${cls}"><div><b>${esc(x.bank)}</b><div>${esc(x.name)}</div></div><span>${esc(fmtShort(x.date))}<br>${esc(suffix)}</span></div>`;
+        const suffix=days<0
+          ? (x.kind==='cloud_promo'?`в архіві · ${Math.abs(days)} дн.`:`прострочено ${Math.abs(days)} дн.`)
+          : days===0?'закінчується сьогодні':`через ${days} дн.`;
+        return `<div class="sf-rollover-item ${cls}"><div><b>${esc(x.bank)}</b><div>${esc(x.name)}${x.kind==='cloud_promo'?' · сайт':''}</div></div><span>${esc(fmtShort(x.date))}<br>${esc(suffix)}</span></div>`;
       }).join('');
       roll.innerHTML=`<div class="sf-overview-title">Rollover / найближчі строки</div>${rows?`<div class="sf-rollover-list">${rows}</div>`:'<div class="sf-rollover-empty">У прочитаних офіційних джерелах немає визначених строків завершення.</div>'}`;
     }
@@ -386,17 +402,19 @@
     const c=client(); if(!c)return;
     state.busy=true;
     try{
-      const [{data:cands,error:ce},{data:sources,error:se},{data:runs,error:re},{data:snaps,error:sne}]=await Promise.all([
+      const [{data:cands,error:ce},{data:sources,error:se},{data:runs,error:re},{data:snaps,error:sne},{data:promos,error:pe}]=await Promise.all([
         c.from('scanner_candidates').select('*').order('created_at',{ascending:false}).limit(100),
         c.from('scanner_sources').select('id,bank,publisher,url,purpose,source_role,data_mode,publish_policy,enabled,last_checked_at,last_http_status,last_error'),
         c.from('scanner_runs').select('id,trigger_kind,started_at,finished_at,status,total_sources,changed_sources,failed_sources,candidates_created').order('started_at',{ascending:false}).limit(10),
-        c.from('scanner_snapshots').select('source_id,fetched_at,http_status,title,text_excerpt,parser_version,structured_payload').order('fetched_at',{ascending:false}).limit(250)
+        c.from('scanner_snapshots').select('source_id,fetched_at,http_status,title,text_excerpt,parser_version,structured_payload').order('fetched_at',{ascending:false}).limit(250),
+        c.from('global_content_items').select('base_id,payload,hidden,source_url,updated_at').eq('block','promo').limit(250)
       ]);
-      if(ce)throw ce;if(se)throw se;if(re)throw re;if(sne)throw sne;
+      if(ce)throw ce;if(se)throw se;if(re)throw re;if(sne)throw sne;if(pe)throw pe;
       state.candidates=cands||[];
       state.sources=Object.fromEntries((sources||[]).map(x=>[x.id,x]));
       state.runs=runs||[];
       state.snapshots=snaps||[];
+      state.promos=promos||[];
       state.latestSnapshots={};
       for(const snap of state.snapshots){if(!state.latestSnapshots[snap.source_id])state.latestSnapshots[snap.source_id]=snap;}
       render();
