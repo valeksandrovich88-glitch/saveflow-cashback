@@ -2163,7 +2163,8 @@ async function loadSource(source: any) {
         if(source.id==="sense-partners-monthly") structured=normalizeSenseMonthlyStructured(text,structured,loaded.resolvedUrl||source.url);
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
-        if(source.id==="alliance-startova") structured=normalizeAllianceStartovaStructured(text,structured);\n        if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
+        if(source.id==="alliance-startova") structured=normalizeAllianceStartovaStructured(text,structured);
+        if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
         if(source.id==="monobank-cashback-rules") structured=normalizeMonobankRulesStructured(text,structured);
         if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
