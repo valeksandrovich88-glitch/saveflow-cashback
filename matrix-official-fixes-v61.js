@@ -1,5 +1,7 @@
 (()=>{
   const PATCHES=[
+    {bank:'Банк Альянс',category:'Усі покупки',value:'1%',tip:'Картка «Стартова»: 30% кешбеку на покупки власними та кредитними коштами до накопичення 500 грн кешбеку або протягом перших 30 днів; далі автоматично 1%.'},
+    {bank:'Банк Альянс',category:'Комунальні послуги',value:'5%',tip:'Картка «Стартова»: 5% кешбеку за оплату комуналки.'},
     {bank:'RadaBank',category:'Розваги',value:'3%'},
     {bank:'VST bank',category:'АЗС',value:'1,5%',tip:'1,5% на категорію «Авто та АЗС» діє протягом року з моменту купівлі поліса ОСЦПВ у VST bank.'},
     {bank:'Unex Bank',category:"Аптеки / здоров'я",value:'4%',tip:'CARD · жовтень 2026 · 4% на аптеки · базова сторінка банку містить застаріле слово «вересні», але заголовок і creative asset однозначно позначені як жовтень 2026.'},
@@ -7,6 +9,13 @@
     {bank:'Unex Bank',category:'Усі покупки',value:'0,5%',tip:'CARD · жовтень 2026 · 0,5% на всі інші розрахункові операції від 1 грн · максимальний кешбек до 3000 грн/міс.'}
   ];
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+  const OVERRIDE_KEY='saveflow.matrixOverrides.v1';
+  function hasManualOverride(bank,category){
+    try{
+      const data=JSON.parse(localStorage.getItem(OVERRIDE_KEY)||'{}');
+      return !!(data&&typeof data==='object'&&data[`${category}|||${bank}`]);
+    }catch(_){return false;}
+  }
 
   function currentRole(){
     return document.documentElement.dataset.saveflowRole||'public';
@@ -111,6 +120,7 @@
       let rowChanged=false;
       for(const p of PATCHES){
         if(p.category!==category)continue;
+        if(hasManualOverride(p.bank,p.category))continue;
         const idx=cols.get(p.bank);
         if(idx==null)continue;
         rowChanged=setCell(tr.children[idx],p)||rowChanged;
