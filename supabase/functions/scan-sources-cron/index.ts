@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 71;
+const PARSER_VERSION = 72;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -150,39 +150,18 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
-function isoToNumericPromoDate(iso) {
-  const m=String(iso||"").match(/^(20\d{2})-(\d{2})-(\d{2})$/);
-  return m?`${m[3]}.${m[2]}.${m[1]}`:"";
-}
-function fixedPromoSemanticText(text,title,structured) {
-  const raw=String(text||"");
+function fixedPromoSemanticText(focused,title,structured) {
+  const raw=String(focused||"");
   const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim();
   const lowRaw=raw.toLocaleLowerCase("uk-UA");
   const lowTitle=titleBase.toLocaleLowerCase("uk-UA");
-  let start=-1;
-
-  // Anchor on the campaign heading first. Dates often also appear in rotating
-  // "other offers" blocks, which caused false promo changes even when the
-  // campaign body itself was identical.
-  if(lowTitle.length>=8){
-    const first=lowRaw.indexOf(lowTitle);
-    const last=lowRaw.lastIndexOf(lowTitle);
-    start=last>=0?last:first;
-  }
-  if(start<0){
-    const dateAnchor=isoToNumericPromoDate(structured?.valid_from);
-    if(dateAnchor){
-      const dateIdx=raw.indexOf(dateAnchor);
-      if(dateIdx>=0) start=Math.max(0,dateIdx-650);
-    }
-  }
+  let start=lowTitle.length>=8?lowRaw.indexOf(lowTitle):-1;
   if(start<0)start=0;
-
-  let segment=raw.slice(start,start+4200);
+  let segment=raw.slice(start);
   const markers=[
     /\n\s*Інші\s+акції\b/iu,
     /\n\s*Інші\s+пропозиції\b/iu,
-    /\n\s*Поділіться\s+(?:цією\s+)?акцією\b/iu,
+    /\n\s*Поділіться\b/iu,
     /\n\s*Поділитися\s+сторінкою\b/iu,
     /\n\s*Читайте\s+також\b/iu,
     /\n\s*Останні\s+новини\b/iu
@@ -190,17 +169,18 @@ function fixedPromoSemanticText(text,title,structured) {
   let cut=segment.length;
   for(const re of markers){
     const m=re.exec(segment);
-    if(m&&m.index>120)cut=Math.min(cut,m.index);
+    if(m&&m.index>100)cut=Math.min(cut,m.index);
   }
-  segment=segment.slice(0,cut)
+  const core=segment.slice(0,cut)
     .replace(/&(?:#0*38|amp);/giu,"&")
-    .replace(/\s+/g," ")
+    .replace(/[ \t]+/g," ")
+    .replace(/\n{2,}/g,"\n")
     .trim();
   return JSON.stringify({
     title:titleBase,
     valid_from:structured?.valid_from||null,
     valid_to:structured?.valid_to||null,
-    core:segment.slice(0,3200)
+    core:core.slice(0,7000)
   });
 }
 
@@ -2645,20 +2625,20 @@ async function loadSource(source: any) {
         const stablePromo=source.source_role==="primary"&&source.parser_profile==="promos"&&source.data_mode==="fixed"&&!accessBlock&&!structured.unsupported;
         if(stablePromo){
           usesStablePromoFingerprint=true;
-          const semantic=fixedPromoSemanticText(text,pageTitle,structured);
-          hash=await sha256("fixed-promo-v2\n"+semantic);
+          const semantic=fixedPromoSemanticText(safeFocused,pageTitle,structured);
+          hash=await sha256("fixed-promo-v3\n"+semantic);
           const {data:prevPromoRows}=await service.from("scanner_snapshots")
             .select("structured_payload")
             .eq("source_id",source.id)
             .is("error",null)
             .order("fetched_at",{ascending:false})
             .limit(1);
-          const prevFingerprint=String(prevPromoRows?.[0]?.structured_payload?.promo_semantic_fingerprint||"");
-          // Missing fingerprint means this source is migrating from raw-HTML
-          // hashing. Treat that first semantic snapshot as a baseline, not as a
-          // real offer change.
-          stablePromoPreviousHash=prevFingerprint||hash;
-          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:2};
+          const prevPayload=prevPromoRows?.[0]?.structured_payload||{};
+          const prevFingerprint=String(prevPayload?.promo_semantic_fingerprint||"");
+          const prevVersion=Number(prevPayload?.promo_semantic_version||0);
+          // A fingerprint-version migration is a baseline, not a bank change.
+          stablePromoPreviousHash=prevVersion===3&&prevFingerprint?prevFingerprint:hash;
+          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:3};
         }else{
           hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
         }
