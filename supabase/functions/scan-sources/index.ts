@@ -2836,13 +2836,43 @@ async function loadSource(source: any) {
           if (matrixEvidenceProfile&&hasComparableEvidence&&affected.length) { type="reference_to_official_review"; priority="high"; }
           else if (source.data_mode==="dynamic"||source.data_mode==="personalized"||source.publish_policy==="manual_only") { type="dynamic_or_personalized_source_changed"; priority="high"; }
         }
-        const {data,error}=await service.from("scanner_candidates").insert({ run_id:run.id, source_id:source.id, bank:source.bank||null, candidate_type:type, priority, source_role:source.source_role, old_hash:oldHash, new_hash:hash, affected_cells:affected, excerpt:safeFocused.slice(0,6000), parser_version:PARSER_VERSION, structured_payload:structured, status:"pending" }).select("id,candidate_type,priority").single();
-        if (!error&&data) { candidate=data; candidates++; }
+        const {data:existingPending}=await service.from("scanner_candidates")
+          .select("id")
+          .eq("source_id",source.id)
+          .eq("candidate_type",type)
+          .eq("status","pending")
+          .order("created_at",{ascending:false})
+          .limit(1);
+        if(existingPending?.length){
+          const pendingId=existingPending[0].id;
+          await service.from("scanner_candidates").update({
+            run_id:run.id,priority,source_role:source.source_role,old_hash:oldHash,new_hash:hash,
+            affected_cells:affected,excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,
+            structured_payload:structured,updated_at:new Date().toISOString()
+          }).eq("id",pendingId);
+          candidate={id:pendingId,candidate_type:type,priority};
+        }else{
+          const {data,error}=await service.from("scanner_candidates").insert({ run_id:run.id, source_id:source.id, bank:source.bank||null, candidate_type:type, priority, source_role:source.source_role, old_hash:oldHash, new_hash:hash, affected_cells:affected, excerpt:safeFocused.slice(0,6000), parser_version:PARSER_VERSION, structured_payload:structured, status:"pending" }).select("id,candidate_type,priority").single();
+          if (!error&&data) { candidate=data; candidates++; }
+        }
       }
       if (!candidate && source.source_role==="primary" && source.publish_policy!=="manual_only" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length<80)) {
-        const {data:existingUnreadable}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_unreadable").eq("new_hash",hash).limit(1);
-        if (!existingUnreadable?.length) {
-          const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
+        const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
+        const {data:existingUnreadable}=await service.from("scanner_candidates")
+          .select("id")
+          .eq("source_id",source.id)
+          .eq("candidate_type","official_source_unreadable")
+          .eq("status","pending")
+          .order("created_at",{ascending:false})
+          .limit(1);
+        if(existingUnreadable?.length){
+          const pendingId=existingUnreadable[0].id;
+          await service.from("scanner_candidates").update({
+            run_id:run.id,old_hash:oldHash,new_hash:hash,excerpt:safeFocused.slice(0,6000),
+            parser_version:PARSER_VERSION,structured_payload:unreadablePayload,updated_at:new Date().toISOString()
+          }).eq("id",pendingId);
+          candidate={id:pendingId,candidate_type:"official_source_unreadable",priority:"high"};
+        }else{
           const {data:unreadableCandidate,error:unreadableError}=await service.from("scanner_candidates").insert({run_id:run.id,source_id:source.id,bank:source.bank||null,candidate_type:"official_source_unreadable",priority:"high",source_role:source.source_role,old_hash:oldHash,new_hash:hash,affected_cells:[],excerpt:safeFocused.slice(0,6000),parser_version:PARSER_VERSION,structured_payload:unreadablePayload,status:"pending"}).select("id,candidate_type,priority").single();
           if (!unreadableError&&unreadableCandidate) { candidate=unreadableCandidate; candidates++; }
         }
