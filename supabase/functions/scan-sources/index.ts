@@ -2839,7 +2839,7 @@ async function loadSource(source: any) {
         const {data,error}=await service.from("scanner_candidates").insert({ run_id:run.id, source_id:source.id, bank:source.bank||null, candidate_type:type, priority, source_role:source.source_role, old_hash:oldHash, new_hash:hash, affected_cells:affected, excerpt:safeFocused.slice(0,6000), parser_version:PARSER_VERSION, structured_payload:structured, status:"pending" }).select("id,candidate_type,priority").single();
         if (!error&&data) { candidate=data; candidates++; }
       }
-      if (!candidate && source.source_role==="primary" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length<80)) {
+      if (!candidate && source.source_role==="primary" && source.publish_policy!=="manual_only" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length<80)) {
         const {data:existingUnreadable}=await service.from("scanner_candidates").select("id").eq("source_id",source.id).eq("candidate_type","official_source_unreadable").eq("new_hash",hash).limit(1);
         if (!existingUnreadable?.length) {
           const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
