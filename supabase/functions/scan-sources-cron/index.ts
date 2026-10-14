@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 62;
+const PARSER_VERSION = 63;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -727,6 +727,43 @@ function normalizeMonobankRulesStructured(text,structured) {
     partner_definition_mode:"merchant",
     current_category_rates_change_monthly:true,
     confidence:"rules_only"
+  };
+}
+
+function normalizePiraeusWinCardStructured(text,structured) {
+  const raw=String(text||"");
+  const rate=/WinCard[\s\S]{0,500}?2(?:[.,]00)?\s*%|2(?:[.,]00)?\s*%[\s\S]{0,500}?WinCard/iu.test(raw);
+  const max=/максимальн\p{L}*[^\n]{0,100}?500\s*(?:грн|UAH)|maximum[^\n]{0,100}?500\s*UAH/iu.test(raw);
+  const items:any[]=[];
+  if(rate){
+    items.push({
+      kind:"base",
+      name:"Усі покупки",
+      category:"Усі покупки",
+      partner:null,
+      rate_percent:2,
+      rate_text:"2%",
+      current_value:"2%",
+      valid_from:null,
+      valid_to:null,
+      evidence:["Офіційні правила Піреус Банку: WinCard — ставка винагороди CashBack 2,00%."],
+      conditions:[
+        "WinCard.",
+        "Без вибору категорій.",
+        "На окремі MCC-коди кешбек не нараховується.",
+        max?"Максимальний кешбек — 500 грн на місяць.":null
+      ].filter(Boolean)
+    });
+  }
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:rate?[2]:[],
+    limits:{...(structured?.limits||{}),max_cashback_uah:max?500:(structured?.limits?.max_cashback_uah??null)},
+    confidence:rate?"review_ready":(structured?.confidence||"signal_only"),
+    exact_current_rates_public:rate,
+    current_product:"WinCard"
   };
 }
 
@@ -1883,6 +1920,47 @@ async function loadSenseMonthlyPartnersSource() {
   };
 }
 
+async function loadPiraeusCashbackRulesSource(sourceUrl:string) {
+  const headers={
+    "User-Agent":BROWSER_UA,
+    "Accept":"application/pdf,application/octet-stream;q=0.9,text/html;q=0.8,*/*;q=0.7",
+    "Accept-Language":"uk-UA,uk;q=0.9,en;q=0.7",
+    "Referer":"https://www.piraeusbank.ua/ua/individuals/payment-cards/wincard-iz-keshbekom",
+    "Cache-Control":"no-cache",
+    "Pragma":"no-cache"
+  };
+  const res=await fetch(sourceUrl,{redirect:"follow",headers,signal:AbortSignal.timeout(30000)});
+  if(!res.ok) throw new Error("Piraeus cashback rules HTTP "+res.status);
+  const bytes=new Uint8Array(await res.arrayBuffer());
+  const contentType=String(res.headers.get("content-type")||"");
+  const magic=bytes.length>=5?String.fromCharCode(...bytes.slice(0,5)):"";
+  let raw="";
+  let transport="piraeus_rules_html";
+  let binaryHash:string|null=null;
+  if(/application\/pdf/i.test(contentType)||magic==="%PDF-"){
+    binaryHash=await sha256Bytes(bytes);
+    const parsed=await pdf(Buffer.from(bytes));
+    raw=String(parsed.text||"").replace(/\r/g,"\n");
+    transport="piraeus_rules_pdf";
+  }else{
+    raw=new TextDecoder().decode(bytes);
+  }
+  const plain=/</.test(raw)?cleanText(raw):raw;
+  if(plain.length<200 || !/WinCard/iu.test(plain) || !/2(?:[.,]00)?\s*%/u.test(plain) || !/CashBack/iu.test(plain)){
+    throw new Error("Piraeus cashback rules sanity check failed");
+  }
+  return {
+    status:res.status,
+    raw:plain,
+    responseBytes:bytes.byteLength,
+    documentType:"pdf_text",
+    contentType:contentType||"application/pdf",
+    binaryHash,
+    transport,
+    resolvedUrl:sourceUrl
+  };
+}
+
 async function loadMonobankRulesPdfSource(sourceUrl:string) {
   const headers={
     "User-Agent":BROWSER_UA,
@@ -2110,6 +2188,9 @@ async function loadIdeaCashbackCategoriesPdfSource(sourceUrl:string) {
 }
 
 async function loadSource(source: any) {
+    if (source.id === "piraeus-wincard-cashback") {
+      return await loadPiraeusCashbackRulesSource(source.url);
+    }
     if (source.id === "oschad-subscriptions-rules") {
       return await loadMastercardSubscriptionSource();
     }
@@ -2164,6 +2245,7 @@ async function loadSource(source: any) {
         if(source.id==="vst-partners") structured=normalizeVstPartnerStructured(text,structured);
         if(source.id==="globusplus-cashback") structured=normalizeGlobusPartnerStructured(text,structured);
         if(source.id==="alliance-startova") structured=normalizeAllianceStartovaStructured(text,structured);
+        if(source.id==="piraeus-wincard-cashback") structured=normalizePiraeusWinCardStructured(text,structured);
         if(source.id==="oschad-visa-subscriptions") structured=normalizeOschadVisaSubscriptionsStructured(text,structured);
         if(source.id==="monobank-cashback-rules") structured=normalizeMonobankRulesStructured(text,structured);
         if(source.id==="raif-cashback") structured=normalizeRaifCashbackStructured(text,structured);
