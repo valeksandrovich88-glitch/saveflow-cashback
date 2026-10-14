@@ -3151,6 +3151,18 @@ async function loadSource(source: any) {
     results.push({coverage_guard_error:e instanceof Error?e.message:String(e)});
   }
   const finalStatus=failed===list.length&&list.length>0?"failed":(failed?"partial":"completed");
-  await service.from("scanner_runs").update({finished_at:new Date().toISOString(),status:finalStatus,changed_sources:changed,failed_sources:failed,candidates_created:candidates,summary:{fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results}}).eq("id",run.id);
-  return json({run_id:run.id,status:finalStatus,total_sources:list.length,changed_sources:changed,failed_sources:failed,candidates_created:candidates,fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results});
+  let prunedSnapshots=0;
+  try{
+    const {data:pruned,error:pruneError}=await service.rpc("prune_scanner_snapshots",{p_keep_per_source:24});
+    if(pruneError){
+      results.push({snapshot_prune_error:pruneError.message});
+    }else{
+      prunedSnapshots=Number(pruned||0);
+      results.push({snapshot_retention:{keep_per_source:24,deleted:prunedSnapshots}});
+    }
+  }catch(e){
+    results.push({snapshot_prune_error:e instanceof Error?e.message:String(e)});
+  }
+  await service.from("scanner_runs").update({finished_at:new Date().toISOString(),status:finalStatus,changed_sources:changed,failed_sources:failed,candidates_created:candidates,summary:{fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,pruned_snapshots:prunedSnapshots,results}}).eq("id",run.id);
+  return json({run_id:run.id,status:finalStatus,total_sources:list.length,changed_sources:changed,failed_sources:failed,candidates_created:candidates,pruned_snapshots:prunedSnapshots,fingerprint_version:FINGERPRINT_VERSION,parser_version:PARSER_VERSION,results});
 });
