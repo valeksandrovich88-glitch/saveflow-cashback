@@ -112,6 +112,7 @@
   });
 
   const humanType=(c)=>{
+    if(c.candidate_type==='promo_validity_extended') return 'Офіційно продовжено строк спецпропозиції';
     if(c.candidate_type==='official_source_expired') return 'Офіційна пропозиція завершилася';
     if(c.candidate_type==='official_source_unreadable') return 'Офіційне джерело недоступне сканеру';
     if(c.candidate_type==='reference_without_official_source') return 'Немає офіційного джерела для перевірки';
@@ -291,6 +292,8 @@
     const p=c.structured_payload||{};
     const review=p.review_policy||{};
     const expiry=p.expiry_review||{};
+    const promoExtension=p.promo_extension_review||{};
+    const promoExtensions=Array.isArray(promoExtension.extensions)?promoExtension.extensions:[];
     const monthly=p.monthly_source_review||{};
     const consistency=p.source_consistency_review||{};
     const coverageGap=p.coverage_gap||{};
@@ -346,6 +349,7 @@
             <div class="sf-field"><span>Комірок матриці</span><b>${affected.length}</b></div>
           </div>
           ${expiry.expired_on?`<div class="sf-evidence">Строк дії завершився <b>${esc(fmtShort(expiry.expired_on))}</b>. Сканер лише створив задачу на перевірку; автоматичного видалення немає.</div>`:''}
+          ${c.candidate_type==='promo_validity_extended'?`<div class="sf-evidence"><b>Банк продовжив строк:</b><br>${promoExtensions.map(x=>`${esc(x.product||x.base_id||'Спецпропозиція')}: <b>${esc(fmtShort(x.old_end))}</b> → <b>${esc(fmtShort(x.new_end))}</b>`).join('<br>')}<br>Поки рішення чекає підтвердження, rollover guard не дасть картці зникнути з публічного сайту.</div>`:''}
           ${c.candidate_type==='official_source_unreadable'?`<div class="sf-evidence"><b>Чому не читається:</b> ${esc(healthReason(health.reason||p.reason))}${health.response_bytes!=null?` · відповідь ${esc(health.response_bytes)} байт`:''}${health.transport?` · ${esc(health.transport)}`:''}. Дані з такого джерела не застосовуються автоматично.</div>`:''}
           ${c.candidate_type==='reference_without_official_source'?`<div class="sf-evidence"><b>Проблема покриття:</b> у матриці є ${esc(coverageGap.affected_count??affected.length)} комірок з довідкових джерел, але для цього банку не підключено первинне офіційне джерело. Ці значення не повинні вважатися підтвердженими банком.</div>`:''}
           ${c.candidate_type==='reference_without_official_evidence'?`<div class="sf-evidence"><b>Проблема підтвердження:</b> ${coverageGap.reason==='no_enabled_primary_official_source'?'первинного офіційного джерела немає':'офіційне джерело підключене, але воно не підтверджує ці конкретні категорії/ставки'} · непідтверджено ${esc(coverageGap.affected_count??affected.length)} з ${esc(coverageGap.total_reference_count??affected.length)} reference-комірок. Такі ставки не слід вважати офіційно перевіреними.</div>`:''}
@@ -377,7 +381,9 @@
           ${sourceLink}
           ${rateDocumentLink}
           ${c.status==='pending'&&c.candidate_type==='reference_to_official_review'&&exactMatchCount?`<button class="sf-scan-btn primary" data-confirm-official>${exactMatchCount===1?'Підтвердити 1 збіг офіційно':`Підтвердити ${exactMatchCount} збігів офіційно`}</button>`:''}
-          ${c.status==='pending'?'<button class="sf-scan-btn" data-review="reviewed">Позначити переглянутим</button><button class="sf-scan-btn danger" data-review="rejected">Відхилити</button>':''}
+          ${c.status==='pending'&&c.candidate_type==='promo_validity_extended'?'<button class="sf-scan-btn primary" data-apply-promo-extension>Застосувати нову дату</button>':''}
+          ${c.status==='pending'&&c.candidate_type!=='promo_validity_extended'?'<button class="sf-scan-btn" data-review="reviewed">Позначити переглянутим</button>':''}
+          ${c.status==='pending'?'<button class="sf-scan-btn danger" data-review="rejected">Відхилити</button>':''}
         </div>
       </article>`;
   }
@@ -468,11 +474,70 @@
       card?.querySelectorAll('button').forEach(b=>b.disabled=false);
     }
   }
+  async function applyPromoExtension(id){
+    if(!isAdmin())return;
+    const c=client(),uid=session()?.user?.id;if(!c||!uid)return;
+    const candidate=state.candidates.find(x=>String(x.id)===String(id));
+    if(!candidate||candidate.status!=='pending'||candidate.candidate_type!=='promo_validity_extended')return;
+    const review=candidate.structured_payload?.promo_extension_review||{};
+    const extensions=Array.isArray(review.extensions)?review.extensions:[];
+    if(!extensions.length)return;
+    const card=document.querySelector(`[data-candidate-id="${CSS.escape(String(id))}"]`);
+    card?.querySelectorAll('button').forEach(b=>b.disabled=true);
+    try{
+      const now=new Date().toISOString();
+      for(const ext of extensions){
+        const {data:rows,error:readErr}=await c.from('global_content_items')
+          .select('payload,source_url').eq('block','promo').eq('base_id',ext.base_id).limit(1);
+        if(readErr)throw readErr;
+        const row=rows?.[0];if(!row)throw new Error('Картку спецпропозиції не знайдено: '+ext.base_id);
+        const payload={...(row.payload||{}),end:ext.new_end,updatedAt:now};
+        delete payload.rollover_guard_until;
+        delete payload.rollover_guard_source;
+        delete payload.rollover_guard_detected_on;
+        const {error:updateErr}=await c.from('global_content_items').update({
+          payload,
+          source_url:review.source_url||row.source_url||null,
+          checked_at:now,
+          updated_at:now
+        }).eq('block','promo').eq('base_id',ext.base_id);
+        if(updateErr)throw updateErr;
+      }
+      const {error:ce}=await c.from('scanner_candidates').update({
+        status:'reviewed',reviewed_by:uid,reviewed_at:now,updated_at:now,
+        review_note:'Застосовано офіційно продовжений строк спецпропозиції до live-картки SaveFlow.'
+      }).eq('id',id);
+      if(ce)throw ce;
+      await window.saveflowGlobalCloud?.pull?.();
+      await load();
+    }catch(e){
+      console.warn('SaveFlow promo extension',e);
+      alert('Не вдалося застосувати нову дату: '+(e?.message||e));
+      card?.querySelectorAll('button').forEach(b=>b.disabled=false);
+    }
+  }
+
   async function review(id,status){
     if(!isAdmin()||!['reviewed','rejected'].includes(status))return;
     const c=client(), uid=session()?.user?.id; if(!c||!uid)return;
     const el=document.querySelector(`[data-candidate-id="${CSS.escape(id)}"]`);
     el?.querySelectorAll('button').forEach(b=>b.disabled=true);
+    const candidate=state.candidates.find(x=>String(x.id)===String(id));
+    if(status==='rejected'&&candidate?.candidate_type==='promo_validity_extended'){
+      const review=candidate.structured_payload?.promo_extension_review||{};
+      for(const ext of (Array.isArray(review.extensions)?review.extensions:[])){
+        const {data:rows}=await c.from('global_content_items').select('payload').eq('block','promo').eq('base_id',ext.base_id).limit(1);
+        const row=rows?.[0];
+        if(row){
+          const payload={...(row.payload||{})};
+          delete payload.rollover_guard_until;
+          delete payload.rollover_guard_source;
+          delete payload.rollover_guard_detected_on;
+          await c.from('global_content_items').update({payload,updated_at:new Date().toISOString()}).eq('block','promo').eq('base_id',ext.base_id);
+        }
+      }
+      await window.saveflowGlobalCloud?.pull?.();
+    }
     const {error}=await c.from('scanner_candidates').update({
       status,reviewed_by:uid,reviewed_at:new Date().toISOString(),
       review_note:status==='reviewed'?'Переглянуто в центрі перевірки SaveFlow.':'Відхилено в центрі перевірки SaveFlow.',
@@ -521,6 +586,11 @@
     if(confirmBtn){
       const card=confirmBtn.closest('[data-candidate-id]');
       if(card)confirmOfficialMatches(card.dataset.candidateId);
+    }
+    const extensionBtn=e.target.closest('[data-apply-promo-extension]');
+    if(extensionBtn){
+      const card=extensionBtn.closest('[data-candidate-id]');
+      if(card)applyPromoExtension(card.dataset.candidateId);
     }
     const btn=e.target.closest('[data-review]');
     if(btn){
