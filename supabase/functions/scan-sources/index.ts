@@ -156,14 +156,30 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
-function fixedPromoSemanticText(text,title) {
+function isoToNumericPromoDate(iso) {
+  const m=String(iso||"").match(/^(20\d{2})-(\d{2})-(\d{2})$/);
+  return m?`${m[3]}.${m[2]}.${m[1]}`:"";
+}
+function fixedPromoSemanticText(text,title,structured) {
   const raw=String(text||"");
   const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim();
   const lowRaw=raw.toLocaleLowerCase("uk-UA");
   const lowTitle=titleBase.toLocaleLowerCase("uk-UA");
-  let start=lowTitle.length>=8?lowRaw.indexOf(lowTitle):-1;
+  let start=-1;
+
+  const dateAnchor=isoToNumericPromoDate(structured?.valid_from);
+  if(dateAnchor){
+    const dateIdx=raw.indexOf(dateAnchor);
+    if(dateIdx>=0) start=Math.max(0,dateIdx-650);
+  }
+  if(start<0&&lowTitle.length>=8){
+    const first=lowRaw.indexOf(lowTitle);
+    const last=lowRaw.lastIndexOf(lowTitle);
+    start=last>=0?last:first;
+  }
   if(start<0)start=0;
-  let segment=raw.slice(start,start+6500);
+
+  let segment=raw.slice(start,start+4200);
   const markers=[
     /\n\s*Інші\s+акції\b/iu,
     /\n\s*Інші\s+пропозиції\b/iu,
@@ -181,7 +197,12 @@ function fixedPromoSemanticText(text,title) {
     .replace(/&(?:#0*38|amp);/giu,"&")
     .replace(/\s+/g," ")
     .trim();
-  return [titleBase,segment].filter(Boolean).join("\n").slice(0,6000);
+  return JSON.stringify({
+    title:titleBase,
+    valid_from:structured?.valid_from||null,
+    valid_to:structured?.valid_to||null,
+    core:segment.slice(0,3200)
+  });
 }
 
 function normalizeUkrsibFixedPromoWindow(text,structured) {
@@ -2640,18 +2661,20 @@ async function loadSource(source: any) {
         const stablePromo=source.source_role==="primary"&&source.parser_profile==="promos"&&source.data_mode==="fixed"&&!accessBlock&&!structured.unsupported;
         if(stablePromo){
           usesStablePromoFingerprint=true;
-          const semantic=fixedPromoSemanticText(text,pageTitle);
-          hash=await sha256("fixed-promo-v1\n"+semantic);
+          const semantic=fixedPromoSemanticText(text,pageTitle,structured);
+          hash=await sha256("fixed-promo-v2\n"+semantic);
           const {data:prevPromoRows}=await service.from("scanner_snapshots")
-            .select("title,text_excerpt,structured_payload")
+            .select("structured_payload")
             .eq("source_id",source.id)
             .is("error",null)
             .order("fetched_at",{ascending:false})
             .limit(1);
-          const prev=prevPromoRows?.[0];
-          if(prev?.text_excerpt){
-            stablePromoPreviousHash=await sha256("fixed-promo-v1\n"+fixedPromoSemanticText(prev.text_excerpt,prev.title||pageTitle));
-          }
+          const prevFingerprint=String(prevPromoRows?.[0]?.structured_payload?.promo_semantic_fingerprint||"");
+          // Missing fingerprint means this source is migrating from raw-HTML
+          // hashing. Treat that first semantic snapshot as a baseline, not as a
+          // real offer change.
+          stablePromoPreviousHash=prevFingerprint||hash;
+          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:2};
         }else{
           hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
         }
