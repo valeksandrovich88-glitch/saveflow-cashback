@@ -2750,9 +2750,8 @@ async function loadSource(source: any) {
 
   const list=sources||[];
   // Keep peak memory bounded: several sources parse large HTML/PDF payloads.
-  // Three concurrent sources is fast enough for the monthly scan without
-  // stacking six large parser workloads inside one Edge worker.
-  const SCAN_CONCURRENCY=3;
+  // Run one source at a time so PDF/large-HTML parsers never overlap in memory.
+  const SCAN_CONCURRENCY=1;
   for (let i=0;i<list.length;i+=SCAN_CONCURRENCY) {
     await Promise.all(list.slice(i,i+SCAN_CONCURRENCY).map(scanOne));
   }
