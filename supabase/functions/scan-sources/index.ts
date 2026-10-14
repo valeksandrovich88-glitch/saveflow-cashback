@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 69;
+const PARSER_VERSION = 70;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -2708,14 +2708,26 @@ async function loadSource(source: any) {
         structured={...structured,partner_audit:partnerRosterAudit};
       }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      if(source.id==="abank-cashback-rules"&&!structured.unsupported){
+      if(["abank-cashback-rules","pumb-cashback","vst-cashback-card"].includes(source.id)&&!structured.unsupported){
+        const semanticItems=(Array.isArray(structured.items)?structured.items:[]).map((x:any)=>({
+          kind:x?.kind||null,
+          name:x?.name||null,
+          partner:x?.partner||null,
+          category:x?.category||null,
+          rate_percent:x?.rate_percent??null,
+          valid_from:x?.valid_from||null,
+          valid_to:x?.valid_to||null,
+          mcc:Array.isArray(x?.mcc)?[...x.mcc].map(String).sort():[]
+        })).sort((a:any,b:any)=>JSON.stringify(a).localeCompare(JSON.stringify(b),"uk"));
         const semanticState={
           tax_rate_percent:structured.tax_rate_percent??null,
-          max_cashback_uah:structured?.limits?.max_cashback_uah??null,
-          min_withdrawal_uah:structured?.limits?.min_withdrawal_uah??null,
-          valid_to:structured.valid_to??null
+          rates_percent:Array.isArray(structured.rates_percent)?[...structured.rates_percent].map(Number).sort((a,b)=>b-a):[],
+          limits:structured.limits||{},
+          valid_from:structured.valid_from??null,
+          valid_to:structured.valid_to??null,
+          items:semanticItems
         };
-        hash=await sha256("abank-rules-v1\n"+JSON.stringify(semanticState));
+        hash=await sha256("source-semantic-v2\n"+JSON.stringify(semanticState));
         const {data:prevSemanticRows}=await service.from("scanner_snapshots")
           .select("structured_payload")
           .eq("source_id",source.id)
@@ -2725,7 +2737,7 @@ async function loadSource(source: any) {
         const prevFingerprint=String(prevSemanticRows?.[0]?.structured_payload?.source_semantic_fingerprint||"");
         sourceSemanticPreviousHash=prevFingerprint||hash;
         usesSourceSemanticFingerprint=true;
-        structured={...structured,source_semantic_fingerprint:hash,source_semantic_version:1};
+        structured={...structured,source_semantic_fingerprint:hash,source_semantic_version:2};
       }
       const isInitial=usesSourceSemanticFingerprint
         ? false
