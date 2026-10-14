@@ -2223,19 +2223,19 @@ async function loadMonobankRulesPdfSource(sourceUrl:string) {
   if(!res.ok) throw new Error("monobank rules PDF HTTP "+res.status);
   const bytes=new Uint8Array(await res.arrayBuffer());
   const binaryHash=await sha256Bytes(bytes);
-  const parsed=await pdf(Buffer.from(bytes));
-  const raw=String(parsed.text||"").replace(/\r/g,"\n");
-  if(raw.length<10000 || !/Стаття\s+2\.\s*Кешбек/iu.test(raw) || !/Максимальн\p{L}*\s+сума\s+кешбек/iu.test(raw)){
-    throw new Error("monobank cashback rules PDF text extraction failed");
-  }
+  if(bytes.byteLength<1000) throw new Error("monobank rules PDF response too small");
+  // The full pdf-parse pass is intentionally not performed inside the monthly
+  // scanner worker. It used enough memory to terminate full-bank runs once the
+  // source set grew. The binary SHA detects rule-file changes reliably; the
+  // last parsed structured snapshot remains the comparison baseline.
   return {
     status:res.status,
-    raw,
+    raw:"",
     responseBytes:bytes.byteLength,
-    documentType:"pdf_text",
+    documentType:"pdf",
     contentType:String(res.headers.get("content-type")||"application/pdf"),
     binaryHash,
-    transport:"monobank_pdf_text",
+    transport:"monobank_pdf_fingerprint",
     resolvedUrl:sourceUrl
   };
 }
