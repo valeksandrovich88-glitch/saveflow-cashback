@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 75;
+const PARSER_VERSION = 78;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -150,7 +150,7 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
-function fixedPromoSemanticText(focused) {
+function fixedPromoSemanticText(focused,title="") {
   let segment=String(focused||"");
   const markers=[
     /\n\s*Інші\s+акції/iu,
@@ -158,13 +158,32 @@ function fixedPromoSemanticText(focused) {
     /\n\s*Поділіться/iu,
     /\n\s*Поділитися\s+сторінкою/iu,
     /\n\s*Читайте\s+також/iu,
-    /\n\s*Останні\s+новини/iu
+    /\n\s*Останні\s+новини/iu,
+    /\n\s*Хочете\s+скористатися\s+пропозицією,?\s*оберіть\s+свою\s+картку/iu,
+    /\n\s*Завантажте\s+застосунок\s+UKRSIB/iu
   ];
   let cut=segment.length;
   for(const re of markers){
     const m=re.exec(segment);
     if(m&&m.index>100)cut=Math.min(cut,m.index);
   }
+
+  const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+  const related=/\n([^\n]{18,220})\n(?:0?[1-9]|[12]\d|3[01])\s+(?:січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)\s+20\d{2}(?:\n|$)/giu;
+  for(const m of segment.matchAll(related)){
+    if((m.index??0)<600)continue;
+    const headline=String(m[1]||"").replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+    const sameAsTitle=titleBase&&headline&&(
+      titleBase===headline ||
+      titleBase.includes(headline) ||
+      headline.includes(titleBase)
+    );
+    if(!sameAsTitle){
+      cut=Math.min(cut,m.index??cut);
+      break;
+    }
+  }
+
   return segment.slice(0,cut)
     .replace(/&(?:#0*38|amp);/giu,"&")
     .replace(/[ \t]+/g," ")
@@ -2571,7 +2590,13 @@ async function loadSource(source: any) {
         structured=cached?{...cached,parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||cached.bank||null,source_url:source.url,source_role:source.source_role||cached.source_role||"primary",data_mode:source.data_mode||cached.data_mode||"fixed",publish_policy:source.publish_policy||cached.publish_policy||"review_required",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged}:{parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||null,source_url:source.url,source_role:source.source_role||"primary",data_mode:source.data_mode||"fixed",publish_policy:source.publish_policy||"review_required",parser_profile:source.parser_profile||"rules",review_policy:{auto_publish:false,official_primary:source.source_role==="primary",reference_only:source.source_role==="reference",manual_only:true,requires_human_review:true},unsupported:false,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null,confidence:"fingerprint_only",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged};
         pageTitle=previous?.title||pageTitle; safeFocused=safeDbText(previous?.text_excerpt||""); hash=binaryHash;
       }else{
-        text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
+        text=cleanText(raw);
+        categoryPool=extractDefinedCategoryPool(text,source.id);
+        focused=focusText(text);
+        const fixedPromoParseText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(focused,pageTitle):focused;
+        const fixedPromoRawText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(text,pageTitle):text;
+        safeFocused=safeDbText(focused);
+        structured=extractStructured(source,fixedPromoParseText,pageTitle);
         if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
         if(source.id==="pumb-partners-monthly") structured=normalizePumbMonthlyStructured(text,structured);
@@ -2598,10 +2623,10 @@ async function loadSource(source: any) {
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
         if(["ukrsib-citrus-2026","ukrsib-galtrans-2026","ukrsib-maudau-2026"].includes(source.id)){
-          structured=normalizeUkrsibFixedPromoWindow(text,structured);
+          structured=normalizeUkrsibFixedPromoWindow(fixedPromoRawText,structured);
         }
         if(source.parser_profile==="promos"&&source.data_mode==="fixed"&&!structured.unsupported){
-          const promoWindow=extractPrimaryPromoWindow(text,pageTitle);
+          const promoWindow=extractPrimaryPromoWindow(fixedPromoRawText,pageTitle);
           if(promoWindow.valid_from||promoWindow.valid_to){
             structured={...structured,
               valid_from:promoWindow.valid_from||structured.valid_from||null,
@@ -2613,8 +2638,8 @@ async function loadSource(source: any) {
         const stablePromo=source.source_role==="primary"&&source.parser_profile==="promos"&&source.data_mode==="fixed"&&!accessBlock&&!structured.unsupported;
         if(stablePromo){
           usesStablePromoFingerprint=true;
-          const semantic=fixedPromoSemanticText(safeFocused);
-          hash=await sha256("fixed-promo-v5\n"+semantic);
+          const semantic=fixedPromoSemanticText(safeFocused,pageTitle);
+          hash=await sha256("fixed-promo-v7\n"+semantic);
           const {data:prevPromoRows}=await service.from("scanner_snapshots")
             .select("structured_payload")
             .eq("source_id",source.id)
@@ -2625,8 +2650,8 @@ async function loadSource(source: any) {
           const prevFingerprint=String(prevPayload?.promo_semantic_fingerprint||"");
           const prevVersion=Number(prevPayload?.promo_semantic_version||0);
           // A fingerprint-version migration is a baseline, not a bank change.
-          stablePromoPreviousHash=prevVersion===5&&prevFingerprint?prevFingerprint:hash;
-          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:5};
+          stablePromoPreviousHash=prevVersion===7&&prevFingerprint?prevFingerprint:hash;
+          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:7};
         }else{
           hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
         }
