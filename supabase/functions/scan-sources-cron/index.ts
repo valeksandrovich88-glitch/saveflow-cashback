@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 79;
+const PARSER_VERSION = 80;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -2799,24 +2799,11 @@ async function loadSource(source: any) {
           const oldEnd=String(p.end||"");
           if(!/^20\d{2}-\d{2}-\d{2}$/.test(oldEnd))continue;
           if(newEnd>oldEnd){
-            const guarded={...p,
-              rollover_guard_until:newEnd,
-              rollover_guard_source:source.url,
-              rollover_guard_detected_on:today
-            };
-            await service.from("global_content_items").update({payload:guarded,updated_at:new Date().toISOString()})
-              .eq("block","promo").eq("base_id",row.base_id);
             extensions.push({base_id:row.base_id,old_end:oldEnd,new_end:newEnd,product:p.product||p.title||row.base_id});
-          }else if(p.rollover_guard_source===source.url){
-            delete p.rollover_guard_until;
-            delete p.rollover_guard_source;
-            delete p.rollover_guard_detected_on;
-            await service.from("global_content_items").update({payload:p,updated_at:new Date().toISOString()})
-              .eq("block","promo").eq("base_id",row.base_id);
           }
         }
         if(extensions.length){
-          const review={kind:"promo_validity_extended",detected_on:today,source_url:source.url,extensions,auto_publish:false,rollover_guard:true};
+          const review={kind:"promo_validity_extended",detected_on:today,source_url:source.url,extensions,auto_publish:false,live_mutation:false};
           const extensionHash=await sha256(JSON.stringify(review));
           const {data:existingExtension}=await service.from("scanner_candidates").select("id")
             .eq("source_id",source.id).eq("candidate_type","promo_validity_extended").eq("new_hash",extensionHash).limit(1);
