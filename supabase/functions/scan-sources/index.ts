@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 75;
+const PARSER_VERSION = 76;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -2594,7 +2594,13 @@ async function loadSource(source: any) {
         structured=cached?{...cached,parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||cached.bank||null,source_url:source.url,source_role:source.source_role||cached.source_role||"primary",data_mode:source.data_mode||cached.data_mode||"fixed",publish_policy:source.publish_policy||cached.publish_policy||"review_required",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged}:{parser_version:PARSER_VERSION,source_id:source.id,bank:source.bank||null,source_url:source.url,source_role:source.source_role||"primary",data_mode:source.data_mode||"fixed",publish_policy:source.publish_policy||"review_required",parser_profile:source.parser_profile||"rules",review_policy:{auto_publish:false,official_primary:source.source_role==="primary",reference_only:source.source_role==="reference",manual_only:true,requires_human_review:true},unsupported:false,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null,confidence:"fingerprint_only",source_format:"pdf",content_type:loaded.contentType||"application/pdf",pdf_fingerprint_only:true,pdf_changed_unparsed:pdfChanged};
         pageTitle=previous?.title||pageTitle; safeFocused=safeDbText(previous?.text_excerpt||""); hash=binaryHash;
       }else{
-        text=cleanText(raw); categoryPool=extractDefinedCategoryPool(text,source.id); focused=focusText(text); safeFocused=safeDbText(focused); structured=extractStructured(source,focused,pageTitle);
+        text=cleanText(raw);
+        categoryPool=extractDefinedCategoryPool(text,source.id);
+        focused=focusText(text);
+        const fixedPromoParseText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(focused):focused;
+        const fixedPromoRawText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(text):text;
+        safeFocused=safeDbText(focused);
+        structured=extractStructured(source,fixedPromoParseText,pageTitle);
         if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
         if(source.id==="pumb-cashback") structured=mergePumbPartnerRoster(structured,raw);
         if(source.id==="pumb-partners-monthly") structured=normalizePumbMonthlyStructured(text,structured);
@@ -2621,10 +2627,10 @@ async function loadSource(source: any) {
         if(source.id==="idea-cashback") structured=normalizeIdeaCashbackStructured(raw,text,structured);
         if(source.id==="idea-cashback-categories-pdf") structured=normalizeIdeaCashbackPdfStructured(loaded.ideaPdfItems,structured,loaded.resolvedUrl||source.url);
         if(["ukrsib-citrus-2026","ukrsib-galtrans-2026","ukrsib-maudau-2026"].includes(source.id)){
-          structured=normalizeUkrsibFixedPromoWindow(text,structured);
+          structured=normalizeUkrsibFixedPromoWindow(fixedPromoRawText,structured);
         }
         if(source.parser_profile==="promos"&&source.data_mode==="fixed"&&!structured.unsupported){
-          const promoWindow=extractPrimaryPromoWindow(text,pageTitle);
+          const promoWindow=extractPrimaryPromoWindow(fixedPromoRawText,pageTitle);
           if(promoWindow.valid_from||promoWindow.valid_to){
             structured={...structured,
               valid_from:promoWindow.valid_from||structured.valid_from||null,
