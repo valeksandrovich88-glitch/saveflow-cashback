@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 73;
+const PARSER_VERSION = 74;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -159,12 +159,12 @@ function compactLabel(s) {
 function fixedPromoSemanticText(focused) {
   let segment=String(focused||"");
   const markers=[
-    /\n\s*Інші\s+акції\b/iu,
-    /\n\s*Інші\s+пропозиції\b/iu,
-    /\n\s*Поділіться\b/iu,
-    /\n\s*Поділитися\s+сторінкою\b/iu,
-    /\n\s*Читайте\s+також\b/iu,
-    /\n\s*Останні\s+новини\b/iu
+    /\n\s*Інші\s+акції/iu,
+    /\n\s*Інші\s+пропозиції/iu,
+    /\n\s*Поділіться/iu,
+    /\n\s*Поділитися\s+сторінкою/iu,
+    /\n\s*Читайте\s+також/iu,
+    /\n\s*Останні\s+новини/iu
   ];
   let cut=segment.length;
   for(const re of markers){
@@ -2834,7 +2834,7 @@ async function loadSource(source: any) {
           }).eq("source_id",source.id).eq("candidate_type","promo_validity_extended").eq("status","pending");
         }
       }
-      if (isChanged && !candidate) {
+      if (isChanged && !candidate && source.publish_policy!=="manual_only") {
         changed++;
         let affected:any[]=[], type=source.source_role==="reference"?"reference_change_signal":"official_source_changed", priority=source.source_role==="reference"?"low":"normal";
         if (source.source_role==="reference") {
