@@ -565,22 +565,6 @@
     const c=client(), uid=session()?.user?.id; if(!c||!uid)return;
     const el=document.querySelector(`[data-candidate-id="${CSS.escape(id)}"]`);
     el?.querySelectorAll('button').forEach(b=>b.disabled=true);
-    const candidate=state.candidates.find(x=>String(x.id)===String(id));
-    if(status==='rejected'&&candidate?.candidate_type==='promo_validity_extended'){
-      const review=candidate.structured_payload?.promo_extension_review||{};
-      for(const ext of (Array.isArray(review.extensions)?review.extensions:[])){
-        const {data:rows}=await c.from('global_content_items').select('payload').eq('block','promo').eq('base_id',ext.base_id).limit(1);
-        const row=rows?.[0];
-        if(row){
-          const payload={...(row.payload||{})};
-          delete payload.rollover_guard_until;
-          delete payload.rollover_guard_source;
-          delete payload.rollover_guard_detected_on;
-          await c.from('global_content_items').update({payload,updated_at:new Date().toISOString()}).eq('block','promo').eq('base_id',ext.base_id);
-        }
-      }
-      await window.saveflowGlobalCloud?.pull?.();
-    }
     const {error}=await c.from('scanner_candidates').update({
       status,reviewed_by:uid,reviewed_at:new Date().toISOString(),
       review_note:status==='reviewed'?'Переглянуто в центрі перевірки SaveFlow.':'Відхилено в центрі перевірки SaveFlow.',
