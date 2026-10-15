@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 76;
+const PARSER_VERSION = 77;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -156,7 +156,7 @@ function extractWindow(text) {
 function compactLabel(s) {
   return String(s || "").replace(/^[•·*\-\s]+/,"").replace(/[;:.]+$/,"").replace(/\s+/g," ").trim();
 }
-function fixedPromoSemanticText(focused) {
+function fixedPromoSemanticText(focused,title="") {
   let segment=String(focused||"");
   const markers=[
     /\n\s*Інші\s+акції/iu,
@@ -171,6 +171,27 @@ function fixedPromoSemanticText(focused) {
     const m=re.exec(segment);
     if(m&&m.index>100)cut=Math.min(cut,m.index);
   }
+
+  // Some bank news pages append related cards without an "other offers" heading.
+  // A related card commonly looks like: headline -> standalone publication date.
+  // Keep the page's own headline/date, but stop at the first different dated headline
+  // after the primary article has had enough room to contain its terms.
+  const titleBase=String(title||"").split("|")[0].replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+  const related=/\n([^\n]{18,220})\n(?:0?[1-9]|[12]\d|3[01])\s+(?:січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)\s+20\d{2}(?:\n|$)/giu;
+  for(const m of segment.matchAll(related)){
+    if((m.index??0)<600)continue;
+    const headline=String(m[1]||"").replace(/\s+/g," ").trim().toLocaleLowerCase("uk-UA");
+    const sameAsTitle=titleBase&&headline&&(
+      titleBase===headline ||
+      titleBase.includes(headline) ||
+      headline.includes(titleBase)
+    );
+    if(!sameAsTitle){
+      cut=Math.min(cut,m.index??cut);
+      break;
+    }
+  }
+
   return segment.slice(0,cut)
     .replace(/&(?:#0*38|amp);/giu,"&")
     .replace(/[ \t]+/g," ")
@@ -2597,8 +2618,8 @@ async function loadSource(source: any) {
         text=cleanText(raw);
         categoryPool=extractDefinedCategoryPool(text,source.id);
         focused=focusText(text);
-        const fixedPromoParseText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(focused):focused;
-        const fixedPromoRawText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(text):text;
+        const fixedPromoParseText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(focused,pageTitle):focused;
+        const fixedPromoRawText=source.parser_profile==="promos"&&source.data_mode==="fixed"?fixedPromoSemanticText(text,pageTitle):text;
         safeFocused=safeDbText(focused);
         structured=extractStructured(source,fixedPromoParseText,pageTitle);
         if(source.id==="creditdnepr-cashback") structured=mergeCreditDniproPartnerRoster(normalizeCreditDniproStructured(text,structured),raw);
@@ -2642,8 +2663,8 @@ async function loadSource(source: any) {
         const stablePromo=source.source_role==="primary"&&source.parser_profile==="promos"&&source.data_mode==="fixed"&&!accessBlock&&!structured.unsupported;
         if(stablePromo){
           usesStablePromoFingerprint=true;
-          const semantic=fixedPromoSemanticText(safeFocused);
-          hash=await sha256("fixed-promo-v5\n"+semantic);
+          const semantic=fixedPromoSemanticText(safeFocused,pageTitle);
+          hash=await sha256("fixed-promo-v6\n"+semantic);
           const {data:prevPromoRows}=await service.from("scanner_snapshots")
             .select("structured_payload")
             .eq("source_id",source.id)
@@ -2654,8 +2675,8 @@ async function loadSource(source: any) {
           const prevFingerprint=String(prevPayload?.promo_semantic_fingerprint||"");
           const prevVersion=Number(prevPayload?.promo_semantic_version||0);
           // A fingerprint-version migration is a baseline, not a bank change.
-          stablePromoPreviousHash=prevVersion===5&&prevFingerprint?prevFingerprint:hash;
-          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:5};
+          stablePromoPreviousHash=prevVersion===6&&prevFingerprint?prevFingerprint:hash;
+          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:6};
         }else{
           hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
         }
