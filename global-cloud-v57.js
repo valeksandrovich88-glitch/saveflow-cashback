@@ -73,11 +73,42 @@
 
   function stable(v){try{return JSON.stringify(v??null)}catch(_){return String(v)}}
 
+  let lastSafetyBackupAt=0;
+  let safetyBackupPromise=null;
+  async function ensureSafetyBackup(reason){
+    if(!isAdmin())return null;
+    const now=Date.now();
+    if(now-lastSafetyBackupAt<60000)return null;
+    if(safetyBackupPromise)return safetyBackupPromise;
+    const c=client();if(!c)return null;
+    safetyBackupPromise=(async()=>{
+      const label='Автобекап перед admin edit · '+String(reason||'global')+' · '+new Date().toLocaleString('uk-UA');
+      const {data,error}=await c.rpc('admin_create_global_backup',{p_label:label});
+      if(error)throw error;
+      lastSafetyBackupAt=Date.now();
+      return data;
+    })();
+    try{return await safetyBackupPromise}finally{safetyBackupPromise=null}
+  }
+
+  function blockSuspiciousWipe(kind,removedCount,totalCount,localMissing){
+    const fullWipe=totalCount>0&&removedCount===totalCount;
+    const largeWipe=removedCount>=10;
+    const suspicious=(localMissing&&removedCount>0)||(fullWipe&&totalCount>=3)||largeWipe;
+    if(!suspicious)return;
+    const msg='SaveFlow safety: масове видалення '+String(kind||'даних')+' заблоковано. Хмарні дані не змінено; локальний стан буде відновлено з cloud.';
+    try{alert(msg)}catch(_){}
+    setTimeout(()=>window.saveflowGlobalCloud?.pull?.(),0);
+    throw new Error(msg);
+  }
+
   async function syncMatrix(){
     const c=client(), uid=userId(); if(!c||!uid||!isAdmin())return;
+    const localMissing=localStorage.getItem(KEYS.matrix)==null;
     const ovs=parse(KEYS.matrix,{});
     const {data:existing,error:readErr}=await c.from('global_matrix_overrides').select('cell_key,payload');
     if(readErr)throw readErr;
+    const existingCount=(existing||[]).length;
     const current=new Map((existing||[]).map(r=>[r.cell_key,r.payload||{}]));
     const now=new Date().toISOString();
     const rows=[];
@@ -87,11 +118,13 @@
       }
       current.delete(cell_key);
     }
+    const removed=[...current.keys()];
+    blockSuspiciousWipe('матриці',removed.length,existingCount,localMissing);
+    if(rows.length||removed.length)await ensureSafetyBackup('матриця');
     if(rows.length){
       const {error}=await c.from('global_matrix_overrides').upsert(rows,{onConflict:'cell_key'});
       if(error)throw error;
     }
-    const removed=[...current.keys()];
     if(removed.length){
       const {error}=await c.from('global_matrix_overrides').delete().in('cell_key',removed);
       if(error)throw error;
@@ -128,9 +161,11 @@
 
   async function syncBlock(block){
     const c=client(); if(!c||!isAdmin())return;
+    const localMissing=localStorage.getItem(KEYS[block])==null;
     const desired=blockRows(block);
     const {data:existing,error:readErr}=await c.from('global_content_items').select('block,base_id,payload,hidden,source_url').eq('block',block);
     if(readErr)throw readErr;
+    const existingCount=(existing||[]).length;
     const current=new Map((existing||[]).map(r=>[r.base_id,r]));
     const rows=[];
     for(const row of desired){
@@ -142,11 +177,13 @@
       if(changed)rows.push(row);
       current.delete(row.base_id);
     }
+    const removed=[...current.keys()];
+    blockSuspiciousWipe(block,removed.length,existingCount,localMissing);
+    if(rows.length||removed.length)await ensureSafetyBackup(block);
     if(rows.length){
       const {error}=await c.from('global_content_items').upsert(rows,{onConflict:'block,base_id'});
       if(error)throw error;
     }
-    const removed=[...current.keys()];
     if(removed.length){
       const {error}=await c.from('global_content_items').delete().eq('block',block).in('base_id',removed);
       if(error)throw error;
