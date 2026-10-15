@@ -11,7 +11,7 @@ const corsHeaders = {
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 77;
+const PARSER_VERSION = 78;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -164,7 +164,9 @@ function fixedPromoSemanticText(focused,title="") {
     /\n\s*Поділіться/iu,
     /\n\s*Поділитися\s+сторінкою/iu,
     /\n\s*Читайте\s+також/iu,
-    /\n\s*Останні\s+новини/iu
+    /\n\s*Останні\s+новини/iu,
+    /\n\s*Хочете\s+скористатися\s+пропозицією,?\s*оберіть\s+свою\s+картку/iu,
+    /\n\s*Завантажте\s+застосунок\s+UKRSIB/iu
   ];
   let cut=segment.length;
   for(const re of markers){
@@ -2664,7 +2666,7 @@ async function loadSource(source: any) {
         if(stablePromo){
           usesStablePromoFingerprint=true;
           const semantic=fixedPromoSemanticText(safeFocused,pageTitle);
-          hash=await sha256("fixed-promo-v6\n"+semantic);
+          hash=await sha256("fixed-promo-v7\n"+semantic);
           const {data:prevPromoRows}=await service.from("scanner_snapshots")
             .select("structured_payload")
             .eq("source_id",source.id)
@@ -2675,8 +2677,8 @@ async function loadSource(source: any) {
           const prevFingerprint=String(prevPayload?.promo_semantic_fingerprint||"");
           const prevVersion=Number(prevPayload?.promo_semantic_version||0);
           // A fingerprint-version migration is a baseline, not a bank change.
-          stablePromoPreviousHash=prevVersion===6&&prevFingerprint?prevFingerprint:hash;
-          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:6};
+          stablePromoPreviousHash=prevVersion===7&&prevFingerprint?prevFingerprint:hash;
+          structured={...structured,promo_semantic_fingerprint:hash,promo_semantic_version:7};
         }else{
           hash=source.id==="idea-cashback-categories-pdf"&&loaded.binaryHash?String(loaded.binaryHash):await sha256(accessBlock?`__source_health__:${accessBlock}:${source.url}`:safeFocused);
         }
