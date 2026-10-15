@@ -22,11 +22,7 @@
   }
   function promoEnd(payload){
     const end=String(payload?.end||'').trim();
-    const guard=String(payload?.rollover_guard_until||'').trim();
-    const base=/^20\d{2}-\d{2}-\d{2}$/.test(end)?end:null;
-    const protectedUntil=/^20\d{2}-\d{2}-\d{2}$/.test(guard)?guard:null;
-    if(base&&protectedUntil&&protectedUntil>base)return protectedUntil;
-    return base||protectedUntil;
+    return /^20\d{2}-\d{2}-\d{2}$/.test(end)?end:null;
   }
   function isPromoExpired(payload){
     const end=promoEnd(payload);
