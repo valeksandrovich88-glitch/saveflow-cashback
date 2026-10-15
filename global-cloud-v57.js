@@ -10,6 +10,8 @@
   const nativeRemove=Storage.prototype.removeItem;
   let applyingCloud=false;
   let pullInFlight=false;
+  let adminHydrated=false;
+  const queuedKinds=new Set();
   const timers=new Map();
 
   function cloud(){return window.saveflowCloud;}
@@ -46,6 +48,11 @@
 
   function schedule(kind){
     if(applyingCloud||!isAdmin())return;
+    if(!adminHydrated){
+      queuedKinds.add(kind);
+      pullGlobal().catch(console.warn);
+      return;
+    }
     clearTimeout(timers.get(kind));
     timers.set(kind,setTimeout(()=>{
       timers.delete(kind);
@@ -240,11 +247,11 @@
       ]);
       if(me)throw me;if(ce)throw ce;
       const hasCloud=(m?.length||0)+(items?.length||0)>0;
-      if(!hasCloud&&isAdmin()&&localHasGlobal()){
-        await bootstrapLocalToCloud();
+      if(!hasCloud){
+        adminHydrated=false;
+        if(isAdmin())console.warn('SaveFlow safety: cloud global state is empty; local bootstrap is disabled. Restore from a server backup or approved import instead.');
         return;
       }
-      if(!hasCloud)return;
 
       const matrix={};(m||[]).forEach(r=>matrix[r.cell_key]=r.payload||{});
       nativeWrite(KEYS.matrix,matrix);
@@ -258,6 +265,11 @@
       window.saveflowRenderPartners?.();
       window.saveflowRenderPromos?.();
       window.saveflowRenderBonuses?.();
+      adminHydrated=isAdmin();
+      if(adminHydrated&&queuedKinds.size){
+        const pending=[...queuedKinds];queuedKinds.clear();
+        pending.forEach(kind=>schedule(kind));
+      }
     }catch(e){console.warn('SaveFlow global cloud sync',e);}
     finally{pullInFlight=false;}
   }
@@ -291,7 +303,11 @@
     },Math.max(1000,next.getTime()-now.getTime()));
   }
 
-  window.addEventListener('saveflow-auth-change',()=>setTimeout(pullGlobal,0));
+  window.addEventListener('saveflow-auth-change',()=>{
+    adminHydrated=false;
+    queuedKinds.clear();
+    setTimeout(pullGlobal,0);
+  });
   setTimeout(pullGlobal,600);
   scheduleMidnightRollover();
 
