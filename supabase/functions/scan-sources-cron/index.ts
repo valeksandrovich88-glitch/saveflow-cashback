@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 78;
+const PARSER_VERSION = 79;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1982,7 +1982,8 @@ function extractStructured(source, focused, title) {
     const promoLines = title ? [title, ...lines] : lines;
     for (let i = 0; i < promoLines.length; i++) {
       const line = promoLines[i];
-      if (!/%/.test(line) || !/(кешбек|знижк|cashback)/iu.test(line)) continue;
+      const isTitleLine=Boolean(title)&&i===0;
+      if (!/%/.test(line) || (!isTitleLine && !/(кешбек|знижк|cashback)/iu.test(line))) continue;
       if (/(річн|ставк|комісі|подат)/iu.test(line)) continue;
       const rm = line.match(/(\d{1,3}(?:[.,]\d+)?)\s*%/);
       const rate = rm ? parseRateNumber(rm[1]) : null;
