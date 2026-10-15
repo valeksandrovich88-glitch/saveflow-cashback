@@ -14,7 +14,7 @@ create table if not exists public.global_state_backups (
 alter table public.global_state_backups enable row level security;
 
 revoke all on table public.global_state_backups from anon, authenticated;
-grant select, delete on table public.global_state_backups to authenticated;
+grant select, insert, delete on table public.global_state_backups to authenticated;
 
 drop policy if exists global_state_backups_admin_select on public.global_state_backups;
 create policy global_state_backups_admin_select
@@ -30,14 +30,24 @@ for delete
 to authenticated
 using (private.is_admin());
 
+drop policy if exists global_state_backups_admin_insert on public.global_state_backups;
+create policy global_state_backups_admin_insert
+on public.global_state_backups
+for insert
+to authenticated
+with check (private.is_admin() and created_by = (select auth.uid()));
+
 create index if not exists global_state_backups_created_at_idx
   on public.global_state_backups(created_at desc);
+
+create index if not exists global_state_backups_created_by_idx
+  on public.global_state_backups(created_by);
 
 create or replace function private.capture_saveflow_global_state()
 returns jsonb
 language sql
 stable
-security definer
+security invoker
 set search_path = ''
 as $$
   select jsonb_build_object(
@@ -73,13 +83,14 @@ as $$
   );
 $$;
 
-revoke all on function private.capture_saveflow_global_state() from public, anon, authenticated;
+revoke all on function private.capture_saveflow_global_state() from public, anon;
+grant execute on function private.capture_saveflow_global_state() to authenticated;
 
 create or replace function private.validate_saveflow_global_state(p_snapshot jsonb)
 returns void
 language plpgsql
 stable
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
@@ -146,13 +157,14 @@ begin
 end;
 $$;
 
-revoke all on function private.validate_saveflow_global_state(jsonb) from public, anon, authenticated;
+revoke all on function private.validate_saveflow_global_state(jsonb) from public, anon;
+grant execute on function private.validate_saveflow_global_state(jsonb) to authenticated;
 
 create or replace function public.admin_export_global_state()
 returns jsonb
 language plpgsql
 stable
-security definer
+security invoker
 set search_path = ''
 as $$
 begin
@@ -169,7 +181,7 @@ grant execute on function public.admin_export_global_state() to authenticated;
 create or replace function public.admin_create_global_backup(p_label text default null)
 returns uuid
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
@@ -201,7 +213,7 @@ create or replace function public.admin_replace_global_state(
 )
 returns jsonb
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
@@ -270,7 +282,7 @@ grant execute on function public.admin_replace_global_state(jsonb,text) to authe
 create or replace function public.admin_restore_global_backup(p_backup_id uuid)
 returns jsonb
 language plpgsql
-security definer
+security invoker
 set search_path = ''
 as $$
 declare
