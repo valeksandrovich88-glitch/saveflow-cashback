@@ -13,6 +13,9 @@ create table if not exists public.global_state_backups (
 
 alter table public.global_state_backups enable row level security;
 
+revoke all on table public.global_state_backups from anon, authenticated;
+grant select, delete on table public.global_state_backups to authenticated;
+
 drop policy if exists global_state_backups_admin_select on public.global_state_backups;
 create policy global_state_backups_admin_select
 on public.global_state_backups
