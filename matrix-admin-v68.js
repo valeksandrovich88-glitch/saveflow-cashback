@@ -1,8 +1,11 @@
 (()=>{
   const KEY='saveflow.matrixOverrides.v1';
   const cloud=()=>window.saveflowCloud;
-  const client=()=>cloud()?.client||null;
-  const isAdmin=()=>cloud()?.profile?.role==='admin'&&!!cloud()?.session?.user;
+  const auth=()=>window.saveflowAuthState||window.saveflowCloud||{};
+  const client=()=>cloud()?.client||auth()?.client||null;
+  const session=()=>auth()?.session||cloud()?.session||null;
+  const profile=()=>auth()?.profile||cloud()?.profile||null;
+  const isAdmin=()=>profile()?.role==='admin'&&!!session()?.user;
   const isEditing=()=>document.body?.classList.contains('site-editing');
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
   const esc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
@@ -155,7 +158,7 @@
 
   async function saveSelected(){
     if(!selected||!isAdmin())return;
-    const c=client();const uid=cloud()?.session?.user?.id;if(!c||!uid)return;
+    const c=client();const uid=session()?.user?.id;if(!c||!uid)return;
     const value=norm(backdrop.querySelector('#adminMatrixValue').value);
     const note=norm(backdrop.querySelector('#adminMatrixNote').value);
     if(!value){
