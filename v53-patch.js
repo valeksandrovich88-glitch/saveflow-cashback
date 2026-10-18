@@ -30,7 +30,7 @@
 
     /* Personal matrix editing: one quiet pencil instead of a separate User mode. */
     #personalMatrixToggle{display:none;position:relative;width:32px;height:32px;padding:0;place-items:center;border-radius:10px;font-size:15px;line-height:1}
-    body.saveflow-signed-in:not(.site-editing) #personalMatrixToggle{display:inline-grid}
+    body.saveflow-signed-in #personalMatrixToggle{display:inline-grid}
     #personalMatrixToggle::after{content:attr(data-tip);position:absolute;right:0;top:38px;width:235px;padding:8px 9px;border-radius:9px;background:#202521;color:#fff;font-size:9px;font-weight:650;line-height:1.4;letter-spacing:0;text-align:left;box-shadow:0 8px 24px rgba(0,0,0,.18);opacity:0;pointer-events:none;transform:translateY(-3px);transition:.14s ease;z-index:35}
     #personalMatrixToggle:hover::after,#personalMatrixToggle:focus-visible::after{opacity:1;transform:translateY(0)}
     body.site-user-mode #personalMatrixToggle{background:#263746;color:#fff;border-color:#263746}
@@ -98,16 +98,22 @@
 
   function signedIn(){return !!window.saveflowAuthState?.session?.user;}
   function currentRole(){return document.documentElement.dataset.saveflowRole||'public';}
+  function profileRole(){return window.saveflowCloud?.profile?.role||currentRole();}
+  function isAdminEditing(){return profileRole()==='admin'&&document.body.classList.contains('site-editing');}
   function enterPersonalMode(){
     if(!signedIn()){
       document.getElementById('accountToggle')?.click();
       return false;
     }
-    if(currentRole()==='admin') return false;
+    if(isAdminEditing()) return false;
     if(currentRole()!=='user') hiddenUserToggle?.click();
     return true;
   }
   personalToggle?.addEventListener('click',()=>{
+    if(isAdminEditing()){
+      window.saveflowAdminMatrixEditor?.toggle?.();
+      return;
+    }
     if(currentRole()==='user') hiddenUserToggle?.click();
     else enterPersonalMode();
   });
@@ -122,7 +128,11 @@
     const signed=signedIn();
     document.body.classList.toggle('saveflow-signed-in',signed);
     if(!signed && currentRole()==='user') hiddenUserToggle?.click();
-    personalToggle?.setAttribute('aria-pressed',currentRole()==='user'?'true':'false');
+    const globalEditing=isAdminEditing();
+    const personalEditing=currentRole()==='user';
+    personalToggle?.setAttribute('aria-pressed',(globalEditing&&window.saveflowAdminMatrixEditor?.active?.())||personalEditing?'true':'false');
+    personalToggle?.setAttribute('aria-label',globalEditing?'Редагувати матрицю для всіх':'Налаштувати мою матрицю');
+    personalToggle?.setAttribute('data-tip',globalEditing?'Глобальні зміни матриці — побачать усі користувачі':'Персональні зміни матриці — бачиш тільки ти');
   }
 
   const tidyAccount=()=>{
@@ -140,6 +150,7 @@
 
   // Track role changes made by the existing V52 role controller.
   new MutationObserver(syncPersonalUi).observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
+  new MutationObserver(syncPersonalUi).observe(document.body,{attributes:true,attributeFilter:['class']});
   tidyAccount();
 
   // Do not show redundant success confirmations after a successful sign-in.
