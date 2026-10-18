@@ -98,7 +98,7 @@
 
   function signedIn(){return !!window.saveflowAuthState?.session?.user;}
   function currentRole(){return document.documentElement.dataset.saveflowRole||'public';}
-  function profileRole(){return window.saveflowCloud?.profile?.role||currentRole();}
+  function profileRole(){return window.saveflowAuthState?.profile?.role||window.saveflowCloud?.profile?.role||currentRole();}
   function isAdminEditing(){return profileRole()==='admin'&&document.body.classList.contains('site-editing');}
   function enterPersonalMode(){
     if(!signedIn()){
