@@ -35,11 +35,11 @@
     body.saveflow-signed-in #personalMatrixToggle{display:inline-grid}
     #personalMatrixToggle::after{content:attr(data-tip);position:absolute;right:0;top:38px;width:235px;padding:8px 9px;border-radius:9px;background:#202521;color:#fff;font-size:9px;font-weight:650;line-height:1.4;letter-spacing:0;text-align:left;box-shadow:0 8px 24px rgba(0,0,0,.18);opacity:0;pointer-events:none;transform:translateY(-3px);transition:.14s ease;z-index:35}
     #personalMatrixToggle:hover::after,#personalMatrixToggle:focus-visible::after{opacity:1;transform:translateY(0)}
-    body.site-user-mode #personalMatrixToggle,
+    body.sf-personal-matrix-edit #personalMatrixToggle,
     body.sf-native-admin-matrix-edit #personalMatrixToggle{background:#263746;color:#fff;border-color:#263746}
     body.site-user-mode .matrix-toolbar-copy{display:none!important}
     #personalMatrixControls{display:none;align-items:center;gap:7px;flex-wrap:wrap}
-    body.site-user-mode #personalMatrixControls,
+    body.site-user-mode.sf-personal-matrix-edit #personalMatrixControls,
     body.site-editing.sf-native-admin-matrix-edit #personalMatrixControls{display:flex}
     body.site-editing.sf-native-admin-matrix-edit #personalBanksBtn{display:none!important}
     .personal-matrix-hint{font-size:9px;color:var(--muted);margin-right:2px}
@@ -106,6 +106,21 @@
   function profileRole(){return window.saveflowAuthState?.profile?.role||window.saveflowCloud?.profile?.role||currentRole();}
   function isAdminEditing(){return profileRole()==='admin'&&document.body.classList.contains('site-editing');}
   let adminMatrixEditActive=false;
+  let personalMatrixEditActive=false;
+  let forcingPersonalView=false;
+
+  function ensurePersonalView(){
+    if(!signedIn()||isAdminEditing()||currentRole()==='user'||forcingPersonalView)return;
+    forcingPersonalView=true;
+    setTimeout(()=>{
+      try{
+        if(signedIn()&&!isAdminEditing()&&currentRole()!=='user') hiddenUserToggle?.click();
+      }finally{
+        forcingPersonalView=false;
+        setTimeout(syncPersonalUi,0);
+      }
+    },0);
+  }
 
   function setAdminMatrixEditing(on){
     const next=!!on&&isAdminEditing();
@@ -118,14 +133,14 @@
     return next;
   }
 
-  function enterPersonalMode(){
-    if(!signedIn()){
-      document.getElementById('accountToggle')?.click();
-      return false;
-    }
-    if(isAdminEditing()) return false;
-    if(currentRole()!=='user') hiddenUserToggle?.click();
-    return true;
+  function setPersonalMatrixEditing(on){
+    if(!signedIn()||isAdminEditing())return false;
+    personalMatrixEditActive=!!on;
+    document.body.classList.toggle('sf-personal-matrix-edit',personalMatrixEditActive);
+    ensurePersonalView();
+    if(currentRole()==='user') window.saveflowMatrixSetEditing?.(personalMatrixEditActive);
+    syncPersonalUi();
+    return personalMatrixEditActive;
   }
 
   personalToggle?.addEventListener('click',()=>{
@@ -133,15 +148,21 @@
       setAdminMatrixEditing(!adminMatrixEditActive);
       return;
     }
-    if(currentRole()==='user') hiddenUserToggle?.click();
-    else enterPersonalMode();
+    if(!signedIn()){
+      document.getElementById('accountToggle')?.click();
+      return;
+    }
+    setPersonalMatrixEditing(!personalMatrixEditActive);
   });
   personalBanksBtn?.addEventListener('click',()=>{
-    if(enterPersonalMode()) setTimeout(()=>hiddenBanksOpen?.click(),0);
+    if(!signedIn()||isAdminEditing())return;
+    if(!personalMatrixEditActive)setPersonalMatrixEditing(true);
+    ensurePersonalView();
+    setTimeout(()=>hiddenBanksOpen?.click(),0);
   });
   personalDone?.addEventListener('click',()=>{
-    if(currentRole()==='user') hiddenUserToggle?.click();
-    else if(isAdminEditing()) setAdminMatrixEditing(false);
+    if(isAdminEditing()) setAdminMatrixEditing(false);
+    else setPersonalMatrixEditing(false);
   });
 
   // Do not allow an accidental blank override. Use the explicit "Очистити клітинку" action instead.
@@ -163,26 +184,32 @@
     const signed=signedIn();
     document.body.classList.toggle('saveflow-signed-in',signed);
     document.body.classList.toggle('saveflow-admin-account',signed&&profileRole()==='admin');
-    if(!signed && currentRole()==='user') hiddenUserToggle?.click();
 
     const globalEditing=isAdminEditing();
-    if(!globalEditing&&adminMatrixEditActive){
-      adminMatrixEditActive=false;
-      document.body.classList.remove('sf-native-admin-matrix-edit');
-    }
-    // V52 enables matrix editing automatically when entering Admin mode.
-    // Keep it off until the shared pencil explicitly enables it.
-    if(globalEditing&&!adminMatrixEditActive){
-      window.saveflowMatrixSetEditing?.(false);
+    if(globalEditing){
+      personalMatrixEditActive=false;
+      document.body.classList.remove('sf-personal-matrix-edit');
+      if(!adminMatrixEditActive) window.saveflowMatrixSetEditing?.(false);
+    }else{
+      if(adminMatrixEditActive){
+        adminMatrixEditActive=false;
+        document.body.classList.remove('sf-native-admin-matrix-edit');
+      }
+      if(signed){
+        ensurePersonalView();
+        if(currentRole()==='user') window.saveflowMatrixSetEditing?.(personalMatrixEditActive);
+      }else{
+        personalMatrixEditActive=false;
+        document.body.classList.remove('sf-personal-matrix-edit');
+      }
     }
 
-    const personalEditing=currentRole()==='user';
-    const active=personalEditing||(globalEditing&&adminMatrixEditActive);
+    const active=globalEditing?adminMatrixEditActive:personalMatrixEditActive;
     personalToggle?.setAttribute('aria-pressed',active?'true':'false');
-    personalToggle?.setAttribute('aria-label',globalEditing?'Редагувати матрицю для всіх':'Налаштувати мою матрицю');
+    personalToggle?.setAttribute('aria-label',globalEditing?'Редагувати матрицю для всіх':'Редагувати мою матрицю');
     personalToggle?.setAttribute('data-tip',globalEditing
       ?(adminMatrixEditActive?'Глобальне редагування активне — клікни потрібну клітинку':'Редагувати матрицю для всіх')
-      :'Персональні зміни матриці — бачиш тільки ти');
+      :(personalMatrixEditActive?'Персональне редагування активне — клікни потрібну клітинку':'Редагувати мою матрицю'));
     const hint=document.querySelector('#personalMatrixControls .personal-matrix-hint');
     if(hint)hint.textContent=globalEditing?'Глобальні зміни бачать усі':'Персональні зміни бачиш тільки ти';
   }
