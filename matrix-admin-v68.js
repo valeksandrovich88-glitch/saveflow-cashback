@@ -170,7 +170,7 @@
   }
 
   function closeEditor(){
-    backdrop.classList.remove('show');
+    if(backdrop.classList.contains('show'))backdrop.classList.remove('show');
     selected=null;
   }
 
@@ -258,15 +258,20 @@
     document.getElementById('matrixTable')?.scrollIntoView({behavior:'smooth',block:'center'});
   }
   function leaveMode(){
-    document.body.classList.remove('sf-admin-matrix-mode');
-    closeEditor();
+    if(document.body.classList.contains('sf-admin-matrix-mode')){
+      document.body.classList.remove('sf-admin-matrix-mode');
+    }
+    if(backdrop.classList.contains('show'))closeEditor();
   }
   function syncUi(){
     ensureToolbar();
     const allowed=isAdmin()&&isEditing();
     const toggle=document.getElementById('adminMatrixToggle');
     if(toggle)toggle.style.display=allowed?'inline-flex':'none';
-    if(!allowed)leaveMode();
+    if(!allowed && (
+      document.body.classList.contains('sf-admin-matrix-mode') ||
+      backdrop.classList.contains('show')
+    ))leaveMode();
     markOverrides();
 
     // Make the personal entry point explicit for ordinary users.
