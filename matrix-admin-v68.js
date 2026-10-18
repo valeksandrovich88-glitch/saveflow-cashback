@@ -21,14 +21,6 @@
   const st=document.createElement('style');
   st.id='sf-admin-matrix-editor-v68';
   st.textContent=`
-    #adminMatrixToggle{display:none}
-    body.site-editing #adminMatrixToggle{display:inline-flex}
-    body.sf-admin-matrix-mode #adminMatrixToggle{background:#244d38;color:#fff;border-color:#244d38}
-    #adminMatrixControls{display:none;align-items:center;gap:7px;flex-wrap:wrap}
-    body.sf-admin-matrix-mode #adminMatrixControls{display:flex}
-    .sf-admin-matrix-hint{font-size:9px;color:var(--muted)}
-    #adminMatrixDone{background:#244d38;color:#fff;border-color:#244d38}
-
     body.sf-admin-matrix-mode #matrixTable tbody td:not(:first-child),
     body.sf-admin-matrix-mode .matrix-card table tbody td:not(:first-child){
       cursor:pointer;position:relative;outline:1px dashed rgba(36,77,56,.22);outline-offset:-2px;
@@ -100,26 +92,7 @@
 
   let selected=null;
 
-  function ensureToolbar(){
-    const actions=document.querySelector('#matrixToolbar .matrix-toolbar-actions');
-    if(!actions)return;
-    if(!document.getElementById('adminMatrixToggle')){
-      const toggle=document.createElement('button');
-      toggle.id='adminMatrixToggle';
-      toggle.type='button';
-      toggle.className='matrix-btn';
-      toggle.textContent='✎ Матриця для всіх';
-      toggle.title='Глобальні зміни — побачать усі користувачі';
-
-      const controls=document.createElement('div');
-      controls.id='adminMatrixControls';
-      controls.innerHTML='<span class="sf-admin-matrix-hint">Клікни по клітинці — зміна буде глобальною</span><button class="matrix-btn" id="adminMatrixDone" type="button">Готово</button>';
-
-      actions.prepend(controls);
-      actions.prepend(toggle);
-    }
-  }
-
+  function ensureToolbar(){}
   function bankMap(table){
     return [...table.querySelectorAll('thead th')].map(th=>norm(th.querySelector('.bank-name')?.textContent||th.textContent||''));
   }
@@ -264,32 +237,34 @@
     if(backdrop.classList.contains('show'))closeEditor();
   }
   function syncUi(){
-    ensureToolbar();
     const allowed=isAdmin()&&isEditing();
-    const toggle=document.getElementById('adminMatrixToggle');
-    if(toggle)toggle.style.display=allowed?'inline-flex':'none';
     if(!allowed && (
       document.body.classList.contains('sf-admin-matrix-mode') ||
       backdrop.classList.contains('show')
     ))leaveMode();
     markOverrides();
-
-    // Make the personal entry point explicit for ordinary users.
-    const personal=document.getElementById('personalMatrixToggle');
-    if(personal&&cloud()?.profile?.role!=='admin'){
-      personal.textContent='✎ Моя матриця';
-      personal.style.width='auto';
-      personal.style.padding='0 10px';
+    const pencil=document.getElementById('personalMatrixToggle');
+    if(pencil&&allowed){
+      const active=document.body.classList.contains('sf-admin-matrix-mode');
+      pencil.setAttribute('aria-pressed',active?'true':'false');
+      pencil.setAttribute('data-tip',active?'Глобальне редагування активне — клікни клітинку':'Глобальні зміни матриці — побачать усі користувачі');
     }
   }
 
-  document.addEventListener('click',e=>{
-    if(e.target.closest('#adminMatrixToggle')){
+  window.saveflowAdminMatrixEditor={
+    toggle(){
+      if(!isAdmin()||!isEditing())return false;
       if(document.body.classList.contains('sf-admin-matrix-mode'))leaveMode();
       else enterMode();
-      return;
-    }
-    if(e.target.closest('#adminMatrixDone')){leaveMode();return}
+      syncUi();
+      return true;
+    },
+    enter(){if(isAdmin()&&isEditing()){enterMode();syncUi();return true}return false},
+    leave(){leaveMode();syncUi();return true},
+    active(){return document.body.classList.contains('sf-admin-matrix-mode')}
+  };
+
+  document.addEventListener('click',e=>{
     if(e.target.closest('[data-admin-matrix-close],[data-admin-matrix-cancel]')||e.target===backdrop){closeEditor();return}
     if(e.target.closest('[data-admin-matrix-save]')){saveSelected();return}
     if(e.target.closest('[data-admin-matrix-reset]')){resetSelected();return}
