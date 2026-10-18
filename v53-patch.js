@@ -18,6 +18,8 @@
     #userModeToggle,#changeHistoryToggle,#sourceAuditToggle,#siteBackupExport{display:none!important}
     #userModePanel,#sourceAuditPanel{display:none!important}
     label[for="siteBackupImport"],label.file-btn:has(#siteBackupImport){display:none!important}
+    #siteEditToggle{display:none!important}
+    body.saveflow-admin-account #siteEditToggle{display:inline-flex!important}
     #siteEditToggle .admin-lock-status{display:none!important}
 
     /* Legacy local backup controls are kept in code but removed from the UI. */
@@ -127,6 +129,7 @@
   function syncPersonalUi(){
     const signed=signedIn();
     document.body.classList.toggle('saveflow-signed-in',signed);
+    document.body.classList.toggle('saveflow-admin-account',signed&&profileRole()==='admin');
     if(!signed && currentRole()==='user') hiddenUserToggle?.click();
     const globalEditing=isAdminEditing();
     const personalEditing=currentRole()==='user';
