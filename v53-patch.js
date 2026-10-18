@@ -136,7 +136,9 @@
   function setPersonalMatrixEditing(on){
     if(!signedIn()||isAdminEditing())return false;
     personalMatrixEditActive=!!on;
-    document.body.classList.toggle('sf-personal-matrix-edit',personalMatrixEditActive);
+    if(document.body.classList.contains('sf-personal-matrix-edit')!==personalMatrixEditActive){
+      document.body.classList.toggle('sf-personal-matrix-edit',personalMatrixEditActive);
+    }
     ensurePersonalView();
     if(currentRole()==='user') window.saveflowMatrixSetEditing?.(personalMatrixEditActive);
     syncPersonalUi();
@@ -188,19 +190,25 @@
     const globalEditing=isAdminEditing();
     if(globalEditing){
       personalMatrixEditActive=false;
-      document.body.classList.remove('sf-personal-matrix-edit');
+      if(document.body.classList.contains('sf-personal-matrix-edit')){
+        document.body.classList.remove('sf-personal-matrix-edit');
+      }
       if(!adminMatrixEditActive) window.saveflowMatrixSetEditing?.(false);
     }else{
       if(adminMatrixEditActive){
         adminMatrixEditActive=false;
-        document.body.classList.remove('sf-native-admin-matrix-edit');
+        if(document.body.classList.contains('sf-native-admin-matrix-edit')){
+          document.body.classList.remove('sf-native-admin-matrix-edit');
+        }
       }
       if(signed){
         ensurePersonalView();
         if(currentRole()==='user') window.saveflowMatrixSetEditing?.(personalMatrixEditActive);
       }else{
         personalMatrixEditActive=false;
-        document.body.classList.remove('sf-personal-matrix-edit');
+        if(document.body.classList.contains('sf-personal-matrix-edit')){
+          document.body.classList.remove('sf-personal-matrix-edit');
+        }
       }
     }
 
