@@ -13,6 +13,7 @@
     'monobank':new Set(['Кафе та ресторани','Квіти','Кіно та театри','Маркетплейси','Продукти','Розваги','Таксі'])
   };
   const OVERRIDE_KEY='saveflow.matrixOverrides.v1';
+  const USER_OVERRIDE_KEY='saveflow.userMatrixOverrides.v1';
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
 
   function bankNameFromHead(th){
@@ -22,15 +23,21 @@
     const first=tr?.querySelector('td:first-child');
     return norm(first?.querySelector('strong')?.textContent||first?.textContent||'');
   }
-  function overrides(){
+  function readOverrides(key){
     try{
-      const data=JSON.parse(localStorage.getItem(OVERRIDE_KEY)||'{}');
+      const data=JSON.parse(localStorage.getItem(key)||'{}');
       return data&&typeof data==='object'?data:{};
     }catch(_){return {};}
   }
   function hasManualOverride(bank,category){
-    const p=overrides()[`${category}|||${bank}`];
-    return !!(p&&typeof p==='object');
+    const key=`${category}|||${bank}`;
+    const admin=readOverrides(OVERRIDE_KEY)[key];
+    if(admin&&typeof admin==='object')return true;
+    if((document.documentElement.dataset.saveflowRole||'public')==='user'){
+      const personal=readOverrides(USER_OVERRIDE_KEY)[key];
+      if(personal&&typeof personal==='object')return true;
+    }
+    return false;
   }
   function clearPlaceholderState(td){
     if(!td)return;
@@ -138,7 +145,7 @@
     requestAnimationFrame(()=>{queued=false;run()});
   }).observe(document.body,{subtree:true,childList:true,characterData:true});
   window.addEventListener('storage',e=>{
-    if(e.key===OVERRIDE_KEY)queueMicrotask(run);
+    if(e.key===OVERRIDE_KEY||e.key===USER_OVERRIDE_KEY)queueMicrotask(run);
   });
   window.addEventListener('saveflow-auth-change',()=>queueMicrotask(run));
 })();
