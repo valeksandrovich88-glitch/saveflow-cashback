@@ -6,6 +6,7 @@
     {
       name:'Банк Власний Рахунок',
       mark:'ВР',
+      logo:'https://bvr.ua/favicon.ico',
       source:'https://bvr.ua/',
       cells:{
         'Продукти':{
@@ -19,6 +20,7 @@
     {
       name:'Картка Rozetka',
       mark:'RZ',
+      logo:'https://www.google.com/s2/favicons?sz=128&domain_url=https%3A%2F%2Frozetka.com.ua',
       source:'https://rozetka.com.ua/ua/pages/rozetka-card-bonus/',
       cells:{
         'Усі покупки':{
@@ -68,6 +70,12 @@
 
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+  function logoHtml(bank,kind='bank-logo'){
+    const fallback='<span class="'+kind+' '+kind+'-fallback">'+esc(bank.mark)+'</span>';
+    if(!bank.logo)return fallback;
+    return '<img class="'+kind+'" src="'+esc(bank.logo)+'" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-flex\';">'+
+      '<span class="'+kind+' '+kind+'-fallback" style="display:none">'+esc(bank.mark)+'</span>';
+  }
   const baseHtml=new Map();
   let ensuring=false;
   let extraActive=null;
@@ -130,7 +138,8 @@
 
         const th=document.createElement('th');
         th.dataset.sfExtraBank=bank.name;
-        th.innerHTML='<div class="bank-head"><span class="bank-logo-wrap"><span class="bank-logo bank-logo-fallback">'+esc(bank.mark)+'</span></span><div class="bank-name">'+esc(bank.name)+'</div></div>';
+        th.dataset.sfBankOrderName=bank.name;
+        th.innerHTML='<div class="bank-head"><span class="bank-logo-wrap">'+logoHtml(bank)+'</span><div class="bank-name">'+esc(bank.name)+'</div></div>';
         headRow.appendChild(th);
 
         table.querySelectorAll('tbody tr').forEach(tr=>{
@@ -289,7 +298,7 @@
     el.dataset.sfSource=o.source;
     el.dataset.search=norm(['Банк Власний Рахунок',o.name,o.category,o.rateText,o.note].join(' ')).toLocaleLowerCase('uk-UA');
     el.innerHTML=
-      '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">ВР</span></span><span>Банк Власний Рахунок</span></div>'+
+      '<div class="partner-bank"><span class="mini-logo-wrap">'+logoHtml(EXTRA_BANKS[0],'mini-logo')+'</span><span>Банк Власний Рахунок</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
       '<div class="tag">'+esc(o.category)+'</div>'+
       '<div class="offer-note">'+esc(o.note)+'</div>';
