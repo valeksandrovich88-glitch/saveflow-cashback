@@ -236,9 +236,42 @@
   window.addEventListener('saveflow-auth-change',tidyAccount);
 
   // Track role changes made by the existing V52 role controller.
-  new MutationObserver(syncPersonalUi).observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
-  new MutationObserver(syncPersonalUi).observe(document.body,{attributes:true,attributeFilter:['class']});
+  let lastObservedRole=currentRole();
+  let matrixRefreshSeq=0;
+  function reapplyMatrixLayers({pull=false}={}){
+    const seq=++matrixRefreshSeq;
+    const apply=()=>{
+      if(seq!==matrixRefreshSeq)return;
+      window.saveflowApplyMatrixOverrides?.();
+      window.saveflowMatrixApplyOverrides?.();
+      window.saveflowApplyExtraBankOverrides?.();
+    };
+    const settle=()=>[0,80,260,700].forEach(ms=>setTimeout(apply,ms));
+    if(pull&&window.saveflowGlobalCloud?.pull){
+      Promise.resolve(window.saveflowGlobalCloud.pull()).finally(settle);
+    }else settle();
+  }
+  const roleObserver=new MutationObserver(()=>{
+    const previous=lastObservedRole;
+    const next=currentRole();
+    lastObservedRole=next;
+    syncPersonalUi();
+    if(previous==='admin'&&next!=='admin'){
+      // Admin exit has several async renderers (role, cloud, personal view).
+      // Pull once, then keep the manual layers last after the transition settles.
+      reapplyMatrixLayers({pull:true});
+    }else{
+      reapplyMatrixLayers();
+    }
+  });
+  roleObserver.observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
+  new MutationObserver(()=>{
+    syncPersonalUi();
+    if(!isAdminEditing())reapplyMatrixLayers();
+  }).observe(document.body,{attributes:true,attributeFilter:['class']});
+  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>reapplyMatrixLayers({pull:true}),60));
   tidyAccount();
+  reapplyMatrixLayers();
 
   // Do not show redundant success confirmations after a successful sign-in.
   const authMsg=document.getElementById('authMessage');
