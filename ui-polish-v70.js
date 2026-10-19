@@ -2,11 +2,16 @@
   const st=document.createElement('style');
   st.id='sf-filter-polish-v70';
   st.textContent=`
+    #promos .filter-menu,
+    #partners .filter-menu{position:relative;z-index:20}
+    #promos .filter-menu[open],
+    #partners .filter-menu[open]{z-index:80}
     #promos .filter-pop,
     #partners .filter-pop{
       min-width:250px!important;
       max-width:min(340px,calc(100vw - 28px))!important;
       box-sizing:border-box!important;
+      z-index:90!important;
     }
     #promos .filter-pop .check-row,
     #partners .filter-pop .check-row{
@@ -54,6 +59,18 @@
     return String(card?.dataset?.bank||card?.querySelector('.promo-bank > span:last-child')?.textContent||'').replace(/\s+/g,' ').trim();
   }
 
+  function canonicalPromoFilter(wrap,names){
+    const rows=[...wrap.querySelectorAll(':scope > label.check-row')];
+    if(rows.length!==names.length)return false;
+    if(wrap.querySelector('.tiny-logo-wrap,.tiny-logo,.tiny-logo-fallback'))return false;
+    return rows.every((label,i)=>{
+      const input=label.querySelector('input[data-promo-bank-value]');
+      const span=label.querySelector(':scope > span:last-child');
+      return input?.getAttribute('data-promo-bank-value')===names[i] &&
+        String(span?.textContent||'').trim()===names[i];
+    });
+  }
+
   function rebuildPromoBankFilter(){
     const wrap=document.getElementById('promoBankFilter');
     const grid=document.querySelector('#promos .promo-grid');
@@ -63,7 +80,7 @@
     const names=[...new Set([...grid.querySelectorAll('.promo-card')].map(bankName).filter(Boolean))]
       .sort((a,b)=>collator.compare(a,b));
     const sig=JSON.stringify(names);
-    if(wrap.dataset.sfCanonicalSig===sig)return;
+    if(wrap.dataset.sfCanonicalSig===sig&&canonicalPromoFilter(wrap,names))return;
 
     const selected=new Set([...wrap.querySelectorAll('[data-promo-bank-value]:checked')]
       .map(x=>x.getAttribute('data-promo-bank-value')).filter(Boolean));
@@ -71,7 +88,7 @@
     wrap.innerHTML='';
     names.forEach(name=>{
       const label=document.createElement('label');
-      label.className='check-row';
+      label.className='check-row check-row--plain';
       const input=document.createElement('input');
       input.type='checkbox';
       input.setAttribute('data-promo-bank-value',name);
@@ -92,9 +109,27 @@
     requestAnimationFrame(()=>{queued=false;rebuildPromoBankFilter();});
   }
 
+  function bindExclusiveMenus(section){
+    const root=document.querySelector(section);
+    if(!root||root.dataset.sfExclusiveFilters==='1')return;
+    root.dataset.sfExclusiveFilters='1';
+    root.querySelectorAll('details.filter-menu').forEach(details=>{
+      details.addEventListener('toggle',()=>{
+        if(!details.open)return;
+        root.querySelectorAll('details.filter-menu[open]').forEach(other=>{
+          if(other!==details)other.open=false;
+        });
+      });
+    });
+  }
+
   schedule();
+  bindExclusiveMenus('#promos');
+  bindExclusiveMenus('#partners');
   const grid=document.querySelector('#promos .promo-grid');
   if(grid)new MutationObserver(schedule).observe(grid,{childList:true,subtree:false});
-  window.addEventListener('saveflow-auth-change',()=>setTimeout(schedule,80));
+  const promoFilter=document.getElementById('promoBankFilter');
+  if(promoFilter)new MutationObserver(schedule).observe(promoFilter,{childList:true,subtree:true});
+  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{schedule();bindExclusiveMenus('#promos');bindExclusiveMenus('#partners');},80));
   window.saveflowRefreshPromoBankFilter=schedule;
 })();
