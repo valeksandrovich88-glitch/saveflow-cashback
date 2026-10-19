@@ -6,9 +6,17 @@
   let dragName='';
 
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+  function headerName(th){
+    if(!th)return '';
+    const cached=norm(th.dataset.sfBankOrderName||'');
+    if(cached)return cached;
+    const name=norm(th.querySelector('.bank-name')?.textContent||th.textContent);
+    if(name)th.dataset.sfBankOrderName=name;
+    return name;
+  }
   function headers(){
     return [...document.querySelectorAll('#categories .matrix-card table thead th')].slice(1)
-      .map(th=>norm(th.querySelector('.bank-name')?.textContent||th.textContent)).filter(Boolean);
+      .map(headerName).filter(Boolean);
   }
   function loadOrder(){
     try{
@@ -37,7 +45,7 @@
     const row=table?.querySelector('thead tr');
     if(!table||!row||applying)return false;
     const ths=[...row.children].slice(1);
-    const names=ths.map(th=>norm(th.querySelector('.bank-name')?.textContent||th.textContent));
+    const names=ths.map(headerName);
     const desired=normalizedOrder(order,names);
     if(desired.join('\n')===names.join('\n'))return false;
 
@@ -60,19 +68,20 @@
 
   function applyOrder(){
     captureGlobalOrder();
-    const names=headers();
-    if(!names.length)return;
-    const desired=role()==='user'
-      ? normalizedOrder(loadOrder(),names)
-      : normalizedOrder(globalOrder,names);
-    const changed=reorderMatrix(desired);
-    if(changed){
-      setTimeout(()=>{
-        window.saveflowApplyUserBanks?.();
+    if(role()==='user')window.saveflowApplyUserBanks?.();
+    requestAnimationFrame(()=>{
+      const names=headers();
+      if(!names.length)return;
+      const desired=role()==='user'
+        ? normalizedOrder(loadOrder(),names)
+        : normalizedOrder(globalOrder,names);
+      const changed=reorderMatrix(desired);
+      if(changed){
         window.saveflowApplyMatrixOverrides?.();
         window.saveflowApplyExtraBankOverrides?.();
-      },0);
-    }
+      }
+      if(role()==='user')window.saveflowApplyUserBanks?.();
+    });
   }
 
   async function saveCloud(order){
@@ -119,6 +128,19 @@
     ).filter(Boolean);
   }
 
+  function refreshNumbers(){
+    const grid=document.getElementById('userBanksGrid');
+    if(!grid)return;
+    [...grid.querySelectorAll('.user-bank-check')].forEach((label,i)=>{
+      let n=label.querySelector('.sf-bank-order-number');
+      if(!n){
+        n=document.createElement('span');
+        n.className='sf-bank-order-number';
+        label.insertBefore(n,label.firstChild);
+      }
+      n.textContent=String(i+1)+'.';
+    });
+  }
   function moveLabel(label,dir){
     const grid=label?.parentElement;
     if(!grid)return;
@@ -129,6 +151,7 @@
       const next=label.nextElementSibling;
       if(next)grid.insertBefore(next,label);
     }
+    refreshNumbers();
   }
 
   function enhanceGrid(){
@@ -183,9 +206,11 @@
           const rect=label.getBoundingClientRect();
           const after=e.clientY>rect.top+rect.height/2;
           grid.insertBefore(source,after?label.nextSibling:label);
+          refreshNumbers();
         });
       }
     });
+    refreshNumbers();
   }
 
   function saveFromModal(){
@@ -194,21 +219,23 @@
     localStorage.setItem(ORDER_KEY,JSON.stringify(order));
     saveCloud(order);
     applyOrder();
+    setTimeout(applyOrder,80);
     window.saveflowLogChange?.({scope:'user',section:'Профіль',action:'Змінено порядок банків',target:order.join(' → ')});
   }
 
   const st=document.createElement('style');
   st.id='sf-user-bank-order-v70';
   st.textContent=`
-    #userBanksGrid .user-bank-check{display:grid!important;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;cursor:grab}
+    #userBanksGrid{grid-template-columns:1fr!important;max-height:min(58vh,560px);overflow:auto;padding-right:4px}
+    #userBanksGrid .user-bank-check{display:grid!important;grid-template-columns:26px auto minmax(0,1fr) auto;align-items:center;gap:8px;cursor:grab;width:100%!important;box-sizing:border-box}
     #userBanksGrid .user-bank-check:active{cursor:grabbing}
+    #userBanksGrid .sf-bank-order-number{font-size:10px;font-weight:800;color:#718078;text-align:right}
     #userBanksGrid .sf-bank-order-name{min-width:0}
     #userBanksGrid .sf-bank-order-controls{display:flex;align-items:center;gap:3px;margin-left:auto}
     #userBanksGrid .sf-bank-move{width:25px;height:25px;border:1px solid rgba(38,55,70,.14);background:#fff;border-radius:7px;padding:0;line-height:1;cursor:pointer;color:#405047;font-size:11px}
     #userBanksGrid .sf-bank-move:hover{background:#eef4ef}
     #userBanksGrid .sf-bank-drag{width:22px;text-align:center;color:#809087;font-size:16px;font-weight:800;line-height:1}
     #userBanksGrid .sf-bank-dragging{opacity:.45}
-    .sf-user-bank-order-hint{margin:8px 0 12px;font-size:10px;color:#607067;line-height:1.45}
     @media(max-width:760px){#userBanksGrid .sf-bank-drag{display:none}}
   `;
   document.head.appendChild(st);
@@ -222,13 +249,7 @@
   const modal=document.getElementById('userBanksModal');
   const grid=document.getElementById('userBanksGrid');
   const copy=modal?.querySelector('.user-banks-copy');
-  if(copy)copy.textContent='Обери свої банки та задай їх порядок у матриці. Перетягуй рядки за ≡ або використовуй ↑ / ↓. Зміни бачиш тільки ти.';
-  if(copy&&!modal.querySelector('.sf-user-bank-order-hint')){
-    const hint=document.createElement('div');
-    hint.className='sf-user-bank-order-hint';
-    hint.textContent='Порядок синхронізується з твоїм акаунтом і не змінює глобальну матрицю SaveFlow.';
-    copy.insertAdjacentElement('afterend',hint);
-  }
+  if(copy)copy.textContent='Обери банки та розстав їх зверху вниз. Такий самий порядок буде в матриці зліва направо. Використовуй ↑ / ↓ або перетягуй рядки.';
 
   if(grid)new MutationObserver(()=>setTimeout(enhanceGrid,0)).observe(grid,{childList:true});
   document.getElementById('userBanksOpen')?.addEventListener('click',()=>setTimeout(enhanceGrid,0));
