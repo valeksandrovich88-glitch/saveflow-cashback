@@ -128,15 +128,13 @@
       for(const tr of rows){
         const cat=category(tr);
         if(!cat)continue;
-        for(let i=1;i<tr.children.length;i++){
-          const td=tr.children[i];
-          const bank=canonBank(td?.dataset?.sfBankName||td?.dataset?.sfExtraBank||hs[i]||'');
+        for(let i=1;i<tr.children.length&&i<hs.length;i++){
+          const bank=hs[i];
           if(!bank)continue;
           const key=cat+'|||'+bank;
           const e=effective(admin,personal,key);
           if(!e.present)continue;
-          td.dataset.sfBankName=bank;
-          render(td,e.ov,e.layer);
+          render(tr.children[i],e.ov,e.layer);
         }
       }
     }finally{
