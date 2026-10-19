@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 80;
+const PARSER_VERSION = 81;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1343,6 +1343,59 @@ function normalizeAbankCashbackRulesStructured(text,structured) {
   };
 }
 
+function normalizeAbankCashbackApiStructured(rawHtml,structured) {
+  let payload:any=null;
+  try { payload=JSON.parse(String(rawHtml||"")); } catch (_) { return {...structured,unsupported:true,reason:"invalid_abank_cashback_api_json"}; }
+  const pages=Array.isArray(payload?.data)?payload.data:[];
+  const page=pages.find((x:any)=>String(x?.path||"")==="/services/cashback")||pages[0]||null;
+  const widgets=Array.isArray(page?.pageWidgets)?page.pageWidgets:[];
+  const widget=widgets.find((w:any)=>String(w?.code||"")==="partners"&&w?.widget_status!==false);
+  const categoryMap:any={
+    "АТБ":"Продукти",
+    "WOG":"АЗС",
+    "АНЦ":"Аптеки / здоров'я",
+    "MOYO":"Техніка",
+    "Opti":"Таксі",
+    "Master Zoo":"Тварини",
+    "Книгарня Є":"Книги та канцтовари",
+    "Bomond.ua":"Краса",
+    "Euroclub":"Транспорт"
+  };
+  const rows=Array.isArray(widget?.data)?widget.data:[];
+  const items=rows
+    .filter((x:any)=>x?.prod===true&&x?.release===true)
+    .map((x:any)=>{
+      const name=compactLabel(String(x?.title||"").replace(/<[^>]*>/g," "));
+      const desc=compactLabel(String(x?.desc_desktop||x?.desc_mobile||"").replace(/<[^>]*>/g," "));
+      return {
+        kind:"partner",
+        name,
+        partner:name,
+        category:categoryMap[name]||null,
+        rate_percent:null,
+        rate_text:null,
+        current_value:null,
+        valid_from:null,
+        valid_to:null,
+        evidence:["Офіційний production widget «Наші партнери» сторінки кешбеку àбанку"],
+        conditions:desc?[desc]:[]
+      };
+    })
+    .filter((x:any)=>x.name);
+  return {
+    ...structured,
+    items,
+    item_count:items.length,
+    rates_percent:[],
+    partner_roster_count:items.length,
+    partner_roster_source:"official_abank_cashback_cms_api",
+    partner_roster_complete:true,
+    partner_roster_note:"Only prod=true and release=true CMS partner rows are treated as current. Exact partner rates are not published by this API.",
+    exact_partner_rates_public:false,
+    confidence:items.length>=9?"review_ready":"signal_only"
+  };
+}
+
 function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
   const raw=String(rawHtml||"");
   const items=[];
@@ -2616,6 +2669,7 @@ async function loadSource(source: any) {
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
         if(source.id==="izibank-market") structured=normalizeIzibankMarketStructured(raw,text,structured);
         if(source.id==="izibank-cashback-rules") structured=normalizeIzibankRulesStructured(text,structured);
+        if(source.id==="abank-cashback-api") structured=normalizeAbankCashbackApiStructured(raw,structured);
         if(source.id==="abank-cashback") structured=normalizeAbankCashbackLandingStructured(raw,text,structured);
         if(source.id==="abank-cashback-rules") structured=normalizeAbankCashbackRulesStructured(text,structured);
         if(source.id==="bisbank-cashback") structured=normalizeBisbankCashbackStructured(raw,text,structured);
@@ -2678,13 +2732,13 @@ async function loadSource(source: any) {
       if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="pumb-partners-monthly"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null)))));
+      const partnerAuditBank=source.id==="abank-cashback-api"?"àбанк":(source.id==="pumb-partners-monthly"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null))))));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
       }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      if(["abank-cashback-rules","pumb-cashback","vst-cashback-card"].includes(source.id)&&!structured.unsupported){
+      if(["abank-cashback-api","abank-cashback-rules","pumb-cashback","vst-cashback-card"].includes(source.id)&&!structured.unsupported){
         const semanticItems=(Array.isArray(structured.items)?structured.items:[]).map((x:any)=>({
           kind:x?.kind||null,
           name:x?.name||null,
