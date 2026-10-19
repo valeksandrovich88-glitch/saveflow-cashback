@@ -44,13 +44,39 @@
   }
   function neutralCell(td,status,bank){
     if(!td)return false;
+    const isAbank=bank==='àбанк'||bank==='А-Банк';
+    const needsBadge=status==='dynamic'&&isAbank;
     const alreadyPlain=norm(td.textContent)==='—' && !td.querySelector('.cash');
-    if(!alreadyPlain) td.replaceChildren(document.createTextNode('—'));
+
+    if(needsBadge){
+      let cash=td.querySelector('.cash.sf-official-dynamic');
+      let badge=cash?.querySelector('.scope-badge');
+      const valid=cash&&norm(cash.querySelector('.cash-value')?.textContent)==='—'&&badge;
+      if(!valid){
+        td.replaceChildren();
+        cash=document.createElement('div');
+        cash.className='cash has-scope sf-official-dynamic';
+        const value=document.createElement('span');
+        value.className='cash-value';
+        value.textContent='—';
+        badge=document.createElement('span');
+        badge.className='scope-badge';
+        badge.tabIndex=0;
+        badge.textContent='?';
+        cash.append(value,badge);
+        td.appendChild(cash);
+      }
+      const tip='Категорія передбачена офіційними правилами àбанку; точний відсоток залежить від актуальної пропозиції.';
+      badge.dataset.tip=tip;
+      badge.setAttribute('aria-label',tip);
+    }else if(!alreadyPlain){
+      td.replaceChildren(document.createTextNode('—'));
+    }
     td.removeAttribute('title');
     td.dataset.sfOfficialDynamic=status==='dynamic'?'1':'';
     td.dataset.sfOfficialUnverified=status==='unverified'?'1':'';
     td.dataset.sfOfficialBank=bank||'';
-    return !alreadyPlain;
+    return needsBadge?!alreadyPlain:!alreadyPlain;
   }
   function recalcBest(row){
     const cells=[...row.querySelectorAll('td')].slice(1);
