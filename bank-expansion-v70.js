@@ -76,6 +76,10 @@
     return '<img class="'+kind+'" src="'+esc(bank.logo)+'" alt="" referrerpolicy="no-referrer" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'inline-flex\';">'+
       '<span class="'+kind+' '+kind+'-fallback" style="display:none">'+esc(bank.mark)+'</span>';
   }
+  function inlineLogoHtml(bank){
+    if(!bank.logo)return '<span class="sf-inline-logo sf-inline-logo-fallback">'+esc(bank.mark)+'</span>';
+    return '<span class="sf-inline-logo"><img src="'+esc(bank.logo)+'" alt="" referrerpolicy="no-referrer" onerror="this.parentElement.textContent=\''+esc(bank.mark)+'\';this.parentElement.classList.add(\'sf-inline-logo-fallback\');"></span>';
+  }
   const baseHtml=new Map();
   let ensuring=false;
   let extraActive=null;
@@ -139,7 +143,7 @@
         const th=document.createElement('th');
         th.dataset.sfExtraBank=bank.name;
         th.dataset.sfBankOrderName=bank.name;
-        th.innerHTML='<div class="bank-head"><span class="bank-logo-wrap">'+logoHtml(bank)+'</span><div class="bank-name">'+esc(bank.name)+'</div></div>';
+        th.innerHTML='<div class="bank-head"><span class="bank-logo-wrap">'+logoHtml(bank)+'</span><div class="bank-name"><span class="sf-bank-name-with-logo">'+inlineLogoHtml(bank)+esc(bank.name)+'</span></div></div>';
         headRow.appendChild(th);
 
         table.querySelectorAll('tbody tr').forEach(tr=>{
