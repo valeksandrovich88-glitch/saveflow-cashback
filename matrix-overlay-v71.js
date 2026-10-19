@@ -180,9 +180,12 @@
     if(e.key===ADMIN_KEY||e.key===USER_KEY)schedule();
   });
   new MutationObserver(schedule).observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
-  new MutationObserver(()=>{
-    if(!bind())setTimeout(bind,100);
-  }).observe(document.body,{subtree:true,childList:true});
 
-  if(!bind())setTimeout(bind,100);
+  if(!bind()){
+    let tries=0;
+    const timer=setInterval(()=>{
+      tries++;
+      if(bind()||tries>=30)clearInterval(timer);
+    },100);
+  }
 })();
