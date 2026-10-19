@@ -283,12 +283,34 @@
     }
   };
 
+  async function flushPendingAdminSync(){
+    if(!isAdmin()||!timers.size)return;
+    const kinds=[...timers.keys()];
+    kinds.forEach(kind=>{clearTimeout(timers.get(kind));timers.delete(kind);});
+    for(const kind of kinds){
+      if(kind==='matrix')await syncMatrix();
+      else await syncBlock(kind);
+    }
+  }
+
   let lastExpiredVisibility=showExpiredPromos();
   const editModeObserver=new MutationObserver(()=>{
     const next=showExpiredPromos();
     if(next===lastExpiredVisibility)return;
+    const wasEditing=lastExpiredVisibility;
     lastExpiredVisibility=next;
-    setTimeout(pullGlobal,0);
+    (async()=>{
+      try{
+        // Leaving Admin mode must never pull stale cloud state over an edit that
+        // is still waiting in the debounce queue.
+        if(wasEditing&&!next)await flushPendingAdminSync();
+      }catch(e){
+        console.warn('SaveFlow admin-exit sync flush',e);
+      }
+      await pullGlobal();
+      window.saveflowApplyMatrixOverrides?.();
+      window.saveflowMatrixApplyOverrides?.();
+    })().catch(console.warn);
   });
   if(document.body) editModeObserver.observe(document.body,{attributes:true,attributeFilter:['class']});
 
