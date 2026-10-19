@@ -53,10 +53,23 @@
     }
     #categories th[data-sf-extra-bank="Банк Власний Рахунок"] .sf-inline-logo,
     #categories th[data-sf-extra-bank="Картка Rozetka"] .sf-inline-logo{
-      width:30px!important;
+      width:22px!important;
       height:22px!important;
-      flex:0 0 30px!important;
+      flex:0 0 22px!important;
       margin-right:2px!important;
+      background:transparent!important;
+      border:0!important;
+      box-shadow:none!important;
+      padding:0!important;
+      overflow:visible!important;
+    }
+    #categories th[data-sf-extra-bank="Картка Rozetka"] .sf-inline-logo img{
+      width:22px!important;
+      height:22px!important;
+      object-fit:contain!important;
+      mix-blend-mode:multiply!important;
+      border-radius:0!important;
+      background:transparent!important;
     }
     #partners .partner-card[data-bank="Банк Власний Рахунок"] .sf-inline-logo{
       width:26px!important;
@@ -75,6 +88,7 @@
   let queued=false;
 
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+  const displayBankName=value=>value==='Картка Rozetka'?'Rozetka':value;
 
   function cardBank(card){
     return norm(card?.dataset?.bank||
@@ -91,7 +105,7 @@
     document.querySelectorAll('#partners .partner-card,#promos .promo-card').forEach(card=>{
       const name=cardBank(card);if(name)names.add(name);
     });
-    return [...names].sort((a,b)=>collator.compare(a,b));
+    return [...names].sort((a,b)=>collator.compare(displayBankName(a),displayBankName(b)));
   }
 
   function canonicalBankFilter(wrap,names,attr){
@@ -102,7 +116,7 @@
     return rows.every((label,i)=>{
       const input=label.querySelector('input['+attr+']');
       const span=label.querySelector(':scope > span:last-child');
-      return input?.getAttribute(attr)===names[i] && norm(span?.textContent)===names[i];
+      return input?.getAttribute(attr)===names[i] && norm(span?.textContent)===displayBankName(names[i]);
     });
   }
 
@@ -123,7 +137,7 @@
       input.setAttribute(attr,name);
       input.checked=selected.has(name);
       const span=document.createElement('span');
-      span.textContent=name;
+      span.textContent=displayBankName(name);
       label.append(input,span);
       wrap.appendChild(label);
       input.addEventListener('change',()=>search?.dispatchEvent(new Event('input',{bubbles:true})));
