@@ -42,10 +42,29 @@
   }
   function role(){return document.documentElement.dataset.saveflowRole||'public';}
 
+  function stampStableBankNames(){
+    const table=document.querySelector('#categories .matrix-card table');
+    if(!table)return;
+    const heads=[...table.querySelectorAll('thead th')];
+    heads.forEach((th,i)=>{
+      if(i===0)return;
+      const name=headerName(th);
+      if(name)th.dataset.sfBankName=name;
+    });
+    table.querySelectorAll('tbody tr').forEach(tr=>{
+      [...tr.children].forEach((td,i)=>{
+        if(i===0)return;
+        const name=headerName(heads[i]);
+        if(name&&!td.dataset.sfBankName)td.dataset.sfBankName=name;
+      });
+    });
+  }
+
   function reorderMatrix(order){
     const table=document.querySelector('#categories .matrix-card table');
     const row=table?.querySelector('thead tr');
     if(!table||!row||applying)return false;
+    stampStableBankNames();
     const ths=[...row.children].slice(1);
     const names=ths.map(headerName);
     const desired=normalizedOrder(order,names);
@@ -55,7 +74,7 @@
     const bodyRows=[...table.querySelectorAll('tbody tr')];
     const cellMaps=bodyRows.map(tr=>{
       const cells=[...tr.children].slice(1);
-      return new Map(cells.map((td,i)=>[names[i],td]));
+      return new Map(cells.map((td,i)=>[norm(td.dataset.sfBankName)||names[i],td]));
     });
 
     applying=true;
@@ -83,6 +102,7 @@
         window.saveflowApplyExtraBankOverrides?.();
       }
       if(role()==='user')window.saveflowApplyUserBanks?.();
+      window.saveflowApplyAuthoritativeManualLayer?.();
     });
   }
 
