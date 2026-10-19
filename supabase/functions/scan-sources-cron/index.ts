@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 82;
+const PARSER_VERSION = 83;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -1396,6 +1396,77 @@ function normalizeAbankCashbackApiStructured(rawHtml,structured) {
   };
 }
 
+function normalizeBvrMainStructured(text,structured) {
+  const raw=String(text||"");
+  const hasSilpo=/Сільпо/iu.test(raw);
+  const hasOne=/(?:\\+?\\s*1\\s*%|1\\s+балобонус\\p{L}*\\s+за\\s+кожн\\p{L}*\\s+100)/iu.test(raw);
+  const maxMatch=raw.match(/(?:максимальн\\p{L}*|не\\s+більше)[^\\d]{0,70}(500)\\s*(?:балобонус|грн)/iu);
+  const items=(hasSilpo&&hasOne)?[{
+    kind:"partner",name:"Сільпо",partner:"Сільпо",category:"Продукти",
+    rate_percent:1,rate_text:"1%",current_value:"1%",valid_from:null,valid_to:null,
+    evidence:["Офіційна сторінка Банк Власний Рахунок: +1% балобонусами за покупки у «Сільпо»."],
+    conditions:["Партнерська винагорода у «Сільпо»; не є загальним категорійним кешбеком на всі продукти."]
+  }]:[];
+  return {
+    ...structured,items,item_count:items.length,rates_percent:items.length?[1]:[],
+    limits:{...(structured?.limits||{}),partner_monthly_bonus_cap:maxMatch?Number(maxMatch[1]):500},
+    partner_roster_complete:false,
+    partner_roster_note:"Main BVR page confirms the Silpo reward; broader current partner names are audited from the official Silpo/BVR campaign page.",
+    exact_category_rate_public:false,
+    confidence:items.length?"review_ready":"signal_only"
+  };
+}
+
+function normalizeBvrSilpoRewardsStructured(text,structured) {
+  const raw=String(text||"").toLocaleLowerCase("uk-UA");
+  const defs=[
+    {name:"Сільпо",category:"Продукти",rate:1,current:"1%"},
+    {name:"E-ZOO",category:"Тварини",rate:10,current:"до 10%"},
+    {name:"MEGOGO BOOKS",category:"Книги та канцтовари",rate:10,current:"до 10%"},
+    {name:"ON Clinic",category:"Аптеки / здоров'я",rate:10,current:"до 10%"}
+  ];
+  const items=defs.filter(d=>raw.includes(d.name.toLocaleLowerCase("uk-UA"))).map(d=>({
+    kind:"partner",name:d.name,partner:d.name,category:d.category,
+    rate_percent:d.rate,rate_text:d.current,current_value:d.current,
+    valid_from:null,valid_to:"2026-12-31",
+    evidence:[d.name==="Сільпо"
+      ?"Офіційна пропозиція «Сільпо» / Банк Власний Рахунок: +1% у «Сільпо»."
+      :"Офіційна пропозиція прямо називає партнера; сторінка заявляє партнерську винагороду до 10%."],
+    conditions:d.name==="Сільпо"
+      ?["Додаткові балобонуси саме за покупки у «Сільпо»."]
+      :["«До 10%» — опублікована верхня межа партнерської винагороди; фактична ставка залежить від поточної пропозиції."]
+  }));
+  return {
+    ...structured,items,item_count:items.length,
+    rates_percent:uniqNumbers(items.map(x=>x.rate_percent)),valid_to:"2026-12-31",
+    partner_roster_count:items.length,partner_roster_source:"official_silpo_bvr_campaign",
+    partner_roster_complete:false,
+    partner_roster_note:"The page names these partners and says «та інші», so it is not treated as an exhaustive removal roster.",
+    confidence:items.length>=4?"review_ready":"signal_only"
+  };
+}
+
+function normalizeRozetkaCardStructured(text,structured) {
+  const raw=String(text||"");
+  const base=/1\\s*%/u.test(raw)?1:null;
+  const categoryRate=/4\\s*%/u.test(raw)?4:null;
+  const promoRate=/5\\s*%/u.test(raw)?5:null;
+  const items=base!==null?[{
+    kind:"base",name:"Усі покупки",category:"Усі покупки",partner:null,
+    rate_percent:1,rate_text:"1%",current_value:"1%",valid_from:null,valid_to:null,
+    evidence:["Офіційна програма Картки Rozetka: базово 1% бонусними ₴ за покупки."],
+    conditions:["Щомісяця автоматично діють 4% у трьох категоріях; точні категорії місяця показуються у застосунку Rozetka."]
+  }]:[];
+  return {
+    ...structured,items,item_count:items.length,
+    rates_percent:uniqNumbers([base,categoryRate,promoRate].filter((x)=>x!==null)),
+    category_rate_percent:categoryRate,monthly_category_count:3,promo_day_rate_percent:promoRate,
+    exact_current_categories_public:false,current_categories_location:"Rozetka app",
+    limits:{...(structured?.limits||{}),per_direction_bonus_uah:1000,total_monthly_bonus_uah:3000},
+    confidence:items.length?"review_ready":"signal_only"
+  };
+}
+
 function normalizeBisbankCashbackStructured(rawHtml,text,structured) {
   const raw=String(rawHtml||"");
   const items=[];
@@ -2669,6 +2740,9 @@ async function loadSource(source: any) {
         if(source.id==="izibank-cashback") structured=normalizeIzibankCashbackStructured(text,structured);
         if(source.id==="izibank-market") structured=normalizeIzibankMarketStructured(raw,text,structured);
         if(source.id==="izibank-cashback-rules") structured=normalizeIzibankRulesStructured(text,structured);
+        if(source.id==="bvr-main") structured=normalizeBvrMainStructured(text,structured);
+        if(source.id==="bvr-silpo-rewards-2026") structured=normalizeBvrSilpoRewardsStructured(text,structured);
+        if(source.id==="rozetka-card-bonus") structured=normalizeRozetkaCardStructured(text,structured);
         if(source.id==="abank-cashback-api") structured=normalizeAbankCashbackApiStructured(raw,structured);
         if(source.id==="abank-cashback") structured=normalizeAbankCashbackLandingStructured(raw,text,structured);
         if(source.id==="abank-cashback-rules") structured=normalizeAbankCashbackRulesStructured(text,structured);
@@ -2712,7 +2786,7 @@ async function loadSource(source: any) {
         }
       }
       const explicitMaxCashback=extractExplicitMaxCashback(text);
-      if(explicitMaxCashback!==null && !["abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules","raif-cashback","monobank-cashback-rules"].includes(source.id)){
+      if(explicitMaxCashback!==null && !["bvr-main","rozetka-card-bonus","abank-cashback","abank-cashback-rules","izibank-cashback","izibank-market","izibank-cashback-rules","raif-cashback","monobank-cashback-rules"].includes(source.id)){
         const limits={...(structured.limits||{})};
         const candidates=[...new Set([...(Array.isArray(limits.max_cashback_candidates_uah)?limits.max_cashback_candidates_uah:[]),explicitMaxCashback])].sort((a,b)=>a-b);
         structured={...structured,limits:{...limits,max_cashback_uah:explicitMaxCashback,max_cashback_candidates_uah:candidates}};
@@ -2732,13 +2806,13 @@ async function loadSource(source: any) {
       if(monthlySourceIssue) structured={...structured,monthly_source_review:monthlySourceIssue};
       if (categoryPool.length) structured={...structured,category_pool:categoryPool,category_pool_source:"official_definitions"};
       let partnerRosterAudit: any = null;
-      const partnerAuditBank=source.id==="abank-cashback-api"?"àбанк":(source.id==="pumb-partners-monthly"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null))))));
+      const partnerAuditBank=source.id==="bvr-silpo-rewards-2026"?"Банк Власний Рахунок":(source.id==="abank-cashback-api"?"àбанк":(source.id==="pumb-partners-monthly"?"ПУМБ":(source.id==="sense-partners-monthly"?"Sense Bank":(source.id==="vst-partners"?"VST bank":(source.id==="creditdnepr-cashback"?"Банк Кредит Дніпро":(source.id==="globusplus-cashback"?"GlobusPlus":(source.id==="alliance-startova"?"Банк Альянс":null)))))));
       if(partnerAuditBank&&!structured.unsupported){
         partnerRosterAudit=await buildPartnerRosterAudit(service,structured,partnerAuditBank);
         structured={...structured,partner_audit:partnerRosterAudit};
       }
       if (accessBlock) structured={...structured,unsupported:true,reason:accessBlock,items:[],item_count:0,rates_percent:[],mcc:[],limits:{},valid_from:null,valid_to:null};
-      if(["abank-cashback-api","abank-cashback-rules","pumb-cashback","vst-cashback-card"].includes(source.id)&&!structured.unsupported){
+      if(["bvr-main","rozetka-card-bonus","abank-cashback-api","abank-cashback-rules","pumb-cashback","vst-cashback-card"].includes(source.id)&&!structured.unsupported){
         const semanticItems=(Array.isArray(structured.items)?structured.items:[]).map((x:any)=>({
           kind:x?.kind||null,
           name:x?.name||null,
