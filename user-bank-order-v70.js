@@ -213,6 +213,12 @@
   `;
   document.head.appendChild(st);
 
+  const visibleOrderBtn=document.getElementById('personalBanksBtn');
+  if(visibleOrderBtn){
+    visibleOrderBtn.textContent='Банки та порядок';
+    visibleOrderBtn.setAttribute('aria-label','Обрати банки та змінити їх порядок у матриці');
+  }
+
   const modal=document.getElementById('userBanksModal');
   const grid=document.getElementById('userBanksGrid');
   const copy=modal?.querySelector('.user-banks-copy');
