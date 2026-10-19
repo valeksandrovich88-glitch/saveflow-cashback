@@ -6,6 +6,17 @@
     {bank:'ТАСКОМБАНК',category:'Продукти',html:'до 0,5% <span class="slash">/</span> до 3%'}
   ];
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+  const ADMIN_KEY='saveflow.matrixOverrides.v1';
+  const USER_KEY='saveflow.userMatrixOverrides.v1';
+  function readOverrides(key){
+    try{const x=JSON.parse(localStorage.getItem(key)||'{}');return x&&typeof x==='object'?x:{};}catch(_){return {};}
+  }
+  function hasManualOverride(bank,category){
+    const key=category+'|||'+bank;
+    if(readOverrides(ADMIN_KEY)[key])return true;
+    if((document.documentElement.dataset.saveflowRole||'public')==='user'&&readOverrides(USER_KEY)[key])return true;
+    return false;
+  }
   function numberFrom(el){
     const text=norm(el?.textContent||'');
     const nums=[...text.matchAll(/(\d+(?:[.,]\d+)?)\s*%/g)].map(m=>Number(m[1].replace(',','.'))).filter(Number.isFinite);
@@ -42,6 +53,7 @@
         return norm(first?.querySelector('strong')?.textContent||first?.textContent)===fix.category;
       });
       if(!row)continue;
+      if(hasManualOverride(fix.bank,fix.category))continue;
       const td=row.children[idx];
       const value=td?.querySelector('.cash-value');
       if(!value)continue;
