@@ -74,43 +74,53 @@
   const collator=new Intl.Collator('uk-UA',{sensitivity:'base',numeric:true});
   let queued=false;
 
-  function bankName(card){
-    return String(card?.dataset?.bank||card?.querySelector('.promo-bank > span:last-child')?.textContent||'').replace(/\s+/g,' ').trim();
+  const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
+
+  function cardBank(card){
+    return norm(card?.dataset?.bank||
+      card?.querySelector('.partner-bank > span:last-child,.promo-bank > span:last-child')?.textContent||'');
   }
 
-  function canonicalPromoFilter(wrap,names){
+  function allBankNames(){
+    const names=new Set();
+    document.querySelectorAll('#categories thead th').forEach((th,i)=>{
+      if(i===0)return;
+      const name=norm(th.dataset.sfBankOrderName||th.querySelector('.bank-name')?.textContent||th.textContent);
+      if(name)names.add(name);
+    });
+    document.querySelectorAll('#partners .partner-card,#promos .promo-card').forEach(card=>{
+      const name=cardBank(card);if(name)names.add(name);
+    });
+    return [...names].sort((a,b)=>collator.compare(a,b));
+  }
+
+  function canonicalBankFilter(wrap,names,attr){
+    if(!wrap)return false;
     const rows=[...wrap.querySelectorAll(':scope > label.check-row')];
     if(rows.length!==names.length)return false;
     if(wrap.querySelector('.tiny-logo-wrap,.tiny-logo,.tiny-logo-fallback'))return false;
     return rows.every((label,i)=>{
-      const input=label.querySelector('input[data-promo-bank-value]');
+      const input=label.querySelector('input['+attr+']');
       const span=label.querySelector(':scope > span:last-child');
-      return input?.getAttribute('data-promo-bank-value')===names[i] &&
-        String(span?.textContent||'').trim()===names[i];
+      return input?.getAttribute(attr)===names[i] && norm(span?.textContent)===names[i];
     });
   }
 
-  function rebuildPromoBankFilter(){
-    const wrap=document.getElementById('promoBankFilter');
-    const grid=document.querySelector('#promos .promo-grid');
-    const search=document.getElementById('promoSearch');
-    if(!wrap||!grid)return;
-
-    const names=[...new Set([...grid.querySelectorAll('.promo-card')].map(bankName).filter(Boolean))]
-      .sort((a,b)=>collator.compare(a,b));
+  function rebuildBankFilter(wrap,names,attr,search){
+    if(!wrap)return;
     const sig=JSON.stringify(names);
-    if(wrap.dataset.sfCanonicalSig===sig&&canonicalPromoFilter(wrap,names))return;
+    if(wrap.dataset.sfAllBanksSig===sig&&canonicalBankFilter(wrap,names,attr))return;
 
-    const selected=new Set([...wrap.querySelectorAll('[data-promo-bank-value]:checked')]
-      .map(x=>x.getAttribute('data-promo-bank-value')).filter(Boolean));
+    const selected=new Set([...wrap.querySelectorAll('input['+attr+']:checked')]
+      .map(x=>x.getAttribute(attr)).filter(Boolean));
 
-    wrap.innerHTML='';
+    wrap.replaceChildren();
     names.forEach(name=>{
       const label=document.createElement('label');
       label.className='check-row check-row--plain';
       const input=document.createElement('input');
       input.type='checkbox';
-      input.setAttribute('data-promo-bank-value',name);
+      input.setAttribute(attr,name);
       input.checked=selected.has(name);
       const span=document.createElement('span');
       span.textContent=name;
@@ -118,23 +128,35 @@
       wrap.appendChild(label);
       input.addEventListener('change',()=>search?.dispatchEvent(new Event('input',{bubbles:true})));
     });
-    wrap.dataset.sfCanonicalSig=sig;
+    wrap.dataset.sfAllBanksSig=sig;
     search?.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+
+  function rebuildAllBankFilters(){
+    const names=allBankNames();
+    if(!names.length)return;
+    const partnerWrap=document.querySelector('#partners #bankFilterLabel')?.closest('details')?.querySelector('.filter-pop')
+      || document.querySelector('#partners .filter-pop:has([data-bank-value])');
+    const promoWrap=document.getElementById('promoBankFilter');
+    rebuildBankFilter(partnerWrap,names,'data-bank-value',document.getElementById('partnerSearch'));
+    rebuildBankFilter(promoWrap,names,'data-promo-bank-value',document.getElementById('promoSearch'));
   }
 
   function schedule(){
     if(queued)return;
     queued=true;
-    requestAnimationFrame(()=>{queued=false;rebuildPromoBankFilter();});
+    requestAnimationFrame(()=>{
+      queued=false;
+      rebuildAllBankFilters();
+      polishStaticUi();
+    });
   }
 
   function polishStaticUi(){
     document.querySelectorAll('#promos .filter-pop .tiny-logo-wrap,#partners .filter-pop .tiny-logo-wrap').forEach(el=>el.remove());
     const promoKicker=document.querySelector('#promos .section-kicker');
     if(promoKicker)promoKicker.textContent='Тимчасові або умовні пропозиції, акції, знижки';
-    document.querySelectorAll('.update-log summary > span').forEach(el=>{
-      if(/^V\d+\s*→\s*V\d+$/i.test(String(el.textContent||'').trim()))el.remove();
-    });
+    document.querySelectorAll('.update-log').forEach(el=>el.remove());
   }
 
   function bindExclusiveMenus(section){
@@ -155,12 +177,21 @@
   schedule();
   bindExclusiveMenus('#promos');
   bindExclusiveMenus('#partners');
-  const grid=document.querySelector('#promos .promo-grid');
-  if(grid)new MutationObserver(schedule).observe(grid,{childList:true,subtree:false});
+
+  const promoGrid=document.querySelector('#promos .promo-grid');
+  if(promoGrid)new MutationObserver(schedule).observe(promoGrid,{childList:true});
+  const partnerGrid=document.querySelector('#partners .partner-grid');
+  if(partnerGrid)new MutationObserver(schedule).observe(partnerGrid,{childList:true});
+
   const promoFilter=document.getElementById('promoBankFilter');
-  if(promoFilter)new MutationObserver(()=>{schedule();polishStaticUi();}).observe(promoFilter,{childList:true,subtree:true});
-  const partnerFilters=document.querySelector('#partners .filters');
-  if(partnerFilters)new MutationObserver(polishStaticUi).observe(partnerFilters,{childList:true,subtree:true});
-  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{polishStaticUi();schedule();bindExclusiveMenus('#promos');bindExclusiveMenus('#partners');},80));
+  if(promoFilter)new MutationObserver(schedule).observe(promoFilter,{childList:true,subtree:true});
+  const partnerBankFilter=document.querySelector('#partners #bankFilterLabel')?.closest('details')?.querySelector('.filter-pop')
+    || document.querySelector('#partners .filter-pop:has([data-bank-value])');
+  if(partnerBankFilter)new MutationObserver(schedule).observe(partnerBankFilter,{childList:true,subtree:true});
+
+  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{
+    polishStaticUi();schedule();bindExclusiveMenus('#promos');bindExclusiveMenus('#partners');
+  },80));
   window.saveflowRefreshPromoBankFilter=schedule;
+  window.saveflowRefreshBankFilters=schedule;
 })();
