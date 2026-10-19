@@ -325,12 +325,27 @@
     },Math.max(1000,next.getTime()-now.getTime()));
   }
 
+  let initialPullTimer=null;
+  function ensureGlobalHydrated(attempt=0){
+    clearTimeout(initialPullTimer);
+    const c=client();
+    if(c){
+      Promise.resolve(pullGlobal()).catch(console.warn);
+      return;
+    }
+    if(attempt>=60){
+      console.warn('SaveFlow global cloud: Supabase client was not ready after retries.');
+      return;
+    }
+    initialPullTimer=setTimeout(()=>ensureGlobalHydrated(attempt+1),250);
+  }
+
   window.addEventListener('saveflow-auth-change',()=>{
     adminHydrated=false;
     queuedKinds.clear();
-    setTimeout(pullGlobal,0);
+    ensureGlobalHydrated(0);
   });
-  setTimeout(pullGlobal,600);
+  ensureGlobalHydrated(0);
   scheduleMidnightRollover();
 
 
