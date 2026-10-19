@@ -265,13 +265,20 @@
     const apply=()=>{
       if(seq!==matrixRefreshSeq)return;
       window.saveflowApplyMatrixOverrides?.();
-      window.saveflowMatrixApplyOverrides?.();
       window.saveflowApplyExtraBankOverrides?.();
     };
     const settle=()=>[0,80,260,700].forEach(ms=>setTimeout(apply,ms));
-    if(pull&&window.saveflowGlobalCloud?.pull){
-      Promise.resolve(window.saveflowGlobalCloud.pull()).finally(settle);
-    }else settle();
+    if(!pull){settle();return;}
+    (async()=>{
+      try{
+        await window.saveflowGlobalCloud?.pull?.();
+        await window.saveflowCloud?.pullUserCloud?.();
+      }catch(e){
+        console.warn('SaveFlow matrix layer refresh',e);
+      }finally{
+        settle();
+      }
+    })();
   }
   const roleObserver=new MutationObserver(()=>{
     const previous=lastObservedRole;
