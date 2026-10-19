@@ -359,5 +359,6 @@
     if(ensuring)return;
     ensureColumns();
   }).observe(document.querySelector('#matrixTable')||document.body,{childList:true,subtree:true});
+  window.saveflowApplyExtraBankOverrides=applyExtraOverrides;
   window.saveflowEnsureExtraBanks=()=>{ensureColumns();applyExtraOverrides();injectBvrPartners();};
 })();
