@@ -1,4 +1,52 @@
 (()=>{
+  const st=document.createElement('style');
+  st.id='sf-filter-polish-v70';
+  st.textContent=`
+    #promos .filter-pop,
+    #partners .filter-pop{
+      min-width:250px!important;
+      max-width:min(340px,calc(100vw - 28px))!important;
+      box-sizing:border-box!important;
+    }
+    #promos .filter-pop .check-row,
+    #partners .filter-pop .check-row{
+      display:flex!important;
+      align-items:center!important;
+      gap:8px!important;
+      width:100%!important;
+      box-sizing:border-box!important;
+      min-height:31px!important;
+      padding:6px 8px!important;
+    }
+    #promos .filter-pop .check-row > span:last-child,
+    #partners .filter-pop .check-row > span:last-child{
+      display:block!important;
+      flex:1 1 auto!important;
+      min-width:0!important;
+      width:auto!important;
+      max-width:none!important;
+      white-space:normal!important;
+      overflow:visible!important;
+      text-overflow:clip!important;
+      color:#102219!important;
+      opacity:1!important;
+      font-size:11px!important;
+      line-height:1.2!important;
+    }
+    #promos #promoBankFilter .check-row > input{
+      flex:0 0 auto!important;
+    }
+    #promos #promoBankFilter .tiny-logo-wrap{
+      display:none!important;
+    }
+    @media(max-width:760px){
+      #promos .filter-pop,#partners .filter-pop{
+        min-width:min(270px,calc(100vw - 24px))!important;
+      }
+    }
+  `;
+  document.head.appendChild(st);
+
   const collator=new Intl.Collator('uk-UA',{sensitivity:'base',numeric:true});
   let queued=false;
 
