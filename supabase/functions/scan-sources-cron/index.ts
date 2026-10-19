@@ -5,7 +5,7 @@ import { Buffer } from "node:buffer";
 
 const BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36";
 const FINGERPRINT_VERSION = 6;
-const PARSER_VERSION = 81;
+const PARSER_VERSION = 82;
 const SEMANTIC_RE = /(кешбек|cashback|категор|партнер|акці|пропозиці|знижк|бонус|винагород|mcc)/i;
 const VALUE_RE = /(\d+(?:[.,]\d+)?\s*%|₴|\bгрн\b|\bдо\s+\d|\b20\d{2}\b|\b\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?\b)/i;
 
@@ -2910,7 +2910,10 @@ async function loadSource(source: any) {
           if (!error&&data) { candidate=data; candidates++; }
         }
       }
-      if (!candidate && source.source_role==="primary" && source.publish_policy!=="manual_only" && !structured.pdf_fingerprint_only && (structured.unsupported || safeFocused.trim().length<80)) {
+      const hasStructuredEvidence=Number(structured?.item_count||0)>0
+        || Number(structured?.partner_roster_count||0)>0
+        || (Array.isArray(structured?.category_pool)&&structured.category_pool.length>0);
+      if (!candidate && source.source_role==="primary" && source.publish_policy!=="manual_only" && !structured.pdf_fingerprint_only && (structured.unsupported || (safeFocused.trim().length<80&&!hasStructuredEvidence))) {
         const unreadablePayload={...structured,source_health:{readable:false,detected_on:new Date().toISOString().slice(0,10),reason:structured.unsupported?(structured.reason||"unsupported_content"):"empty_or_too_short_excerpt",excerpt_length:safeFocused.trim().length,response_bytes:responseBytes,transport:loaded.transport,auto_publish:false}};
         const {data:existingUnreadable}=await service.from("scanner_candidates")
           .select("id")
