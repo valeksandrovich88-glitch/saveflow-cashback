@@ -20,6 +20,8 @@
     {key:'pivdennyi',name:'Банк Південний',domain:'bank.com.ua',aliases:['банк південний','південний','пд']},
     {key:'raif',name:'Райффайзен Банк',domain:'raiffeisen.ua',aliases:['райффайзен банк','райффайзен','raiffeisen','р']},
     {key:'kredo',name:'KredoBank',domain:'kredobank.com.ua',aliases:['kredobank','кредобанк','k']},
+    {key:'bvr',name:'Банк Власний Рахунок',domain:'bvr.ua',aliases:['банк власний рахунок','власний рахунок','бвр','bvr']},
+    {key:'rozetka',name:'Картка Rozetka',domain:'rozetka.com.ua',aliases:['картка rozetka','rozetka card','rozetka','розетка']},
     {key:'vst',name:'VST bank',domain:'vstbank.ua',aliases:['vst bank','vst']},
     {key:'privat',name:'ПриватБанк',domain:'privatbank.ua',aliases:['приватбанк','privatbank','п']},
     {key:'sense',name:'Sense Bank',domain:'sensebank.com.ua',aliases:['sense bank','sense','sb']},
