@@ -1398,9 +1398,9 @@ function normalizeAbankCashbackApiStructured(rawHtml,structured) {
 
 function normalizeBvrMainStructured(text,structured) {
   const raw=String(text||"");
-  const hasSilpo=/Сільпо/iu.test(raw);
-  const hasOne=/(?:\\+?\\s*1\\s*%|1\\s+балобонус\\p{L}*\\s+за\\s+кожн\\p{L}*\\s+100)/iu.test(raw);
-  const maxMatch=raw.match(/(?:максимальн\\p{L}*|не\\s+більше)[^\\d]{0,70}(500)\\s*(?:балобонус|грн)/iu);
+  const plain=raw.toLocaleLowerCase("uk-UA").replace(/\s+/g," ");
+  const hasSilpo=plain.includes("сільпо");
+  const hasOne=plain.includes("1%")||plain.includes("1 %")||plain.includes("1 балобонус");
   const items=(hasSilpo&&hasOne)?[{
     kind:"partner",name:"Сільпо",partner:"Сільпо",category:"Продукти",
     rate_percent:1,rate_text:"1%",current_value:"1%",valid_from:null,valid_to:null,
@@ -1409,7 +1409,7 @@ function normalizeBvrMainStructured(text,structured) {
   }]:[];
   return {
     ...structured,items,item_count:items.length,rates_percent:items.length?[1]:[],
-    limits:{...(structured?.limits||{}),partner_monthly_bonus_cap:maxMatch?Number(maxMatch[1]):500},
+    limits:{...(structured?.limits||{}),partner_monthly_bonus_cap:500},
     partner_roster_complete:false,
     partner_roster_note:"Main BVR page confirms the Silpo reward; broader current partner names are audited from the official Silpo/BVR campaign page.",
     exact_category_rate_public:false,
@@ -1447,10 +1447,11 @@ function normalizeBvrSilpoRewardsStructured(text,structured) {
 }
 
 function normalizeRozetkaCardStructured(text,structured) {
-  const raw=String(text||"");
-  const base=/1\\s*%/u.test(raw)?1:null;
-  const categoryRate=/4\\s*%/u.test(raw)?4:null;
-  const promoRate=/5\\s*%/u.test(raw)?5:null;
+  const raw=String(text||"").replace(/\s+/g," ");
+  const hasPct=(n)=>raw.includes(n+"%")||raw.includes(n+" %");
+  const base=hasPct(1)?1:null;
+  const categoryRate=hasPct(4)?4:null;
+  const promoRate=hasPct(5)?5:null;
   const items=base!==null?[{
     kind:"base",name:"Усі покупки",category:"Усі покупки",partner:null,
     rate_percent:1,rate_text:"1%",current_value:"1%",valid_from:null,valid_to:null,
