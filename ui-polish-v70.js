@@ -41,8 +41,27 @@
     #promos #promoBankFilter .check-row > input{
       flex:0 0 auto!important;
     }
-    #promos #promoBankFilter .tiny-logo-wrap{
+    #promos .filter-pop .tiny-logo-wrap,
+    #partners .filter-pop .tiny-logo-wrap,
+    #promos .filter-pop .tiny-logo,
+    #partners .filter-pop .tiny-logo{
       display:none!important;
+    }
+    body.site-user-mode .cash-td.user-personal-edited::after{
+      display:none!important;
+      content:none!important;
+    }
+    #categories th[data-sf-extra-bank="Банк Власний Рахунок"] .sf-inline-logo,
+    #categories th[data-sf-extra-bank="Картка Rozetka"] .sf-inline-logo{
+      width:30px!important;
+      height:22px!important;
+      flex:0 0 30px!important;
+      margin-right:2px!important;
+    }
+    #partners .partner-card[data-bank="Банк Власний Рахунок"] .sf-inline-logo{
+      width:26px!important;
+      height:20px!important;
+      flex:0 0 26px!important;
     }
     @media(max-width:760px){
       #promos .filter-pop,#partners .filter-pop{
@@ -109,6 +128,15 @@
     requestAnimationFrame(()=>{queued=false;rebuildPromoBankFilter();});
   }
 
+  function polishStaticUi(){
+    document.querySelectorAll('#promos .filter-pop .tiny-logo-wrap,#partners .filter-pop .tiny-logo-wrap').forEach(el=>el.remove());
+    const promoKicker=document.querySelector('#promos .section-kicker');
+    if(promoKicker)promoKicker.textContent='Тимчасові або умовні пропозиції, акції, знижки';
+    document.querySelectorAll('.update-log summary > span').forEach(el=>{
+      if(/^V\d+\s*→\s*V\d+$/i.test(String(el.textContent||'').trim()))el.remove();
+    });
+  }
+
   function bindExclusiveMenus(section){
     const root=document.querySelector(section);
     if(!root||root.dataset.sfExclusiveFilters==='1')return;
@@ -123,13 +151,16 @@
     });
   }
 
+  polishStaticUi();
   schedule();
   bindExclusiveMenus('#promos');
   bindExclusiveMenus('#partners');
   const grid=document.querySelector('#promos .promo-grid');
   if(grid)new MutationObserver(schedule).observe(grid,{childList:true,subtree:false});
   const promoFilter=document.getElementById('promoBankFilter');
-  if(promoFilter)new MutationObserver(schedule).observe(promoFilter,{childList:true,subtree:true});
-  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{schedule();bindExclusiveMenus('#promos');bindExclusiveMenus('#partners');},80));
+  if(promoFilter)new MutationObserver(()=>{schedule();polishStaticUi();}).observe(promoFilter,{childList:true,subtree:true});
+  const partnerFilters=document.querySelector('#partners .filters');
+  if(partnerFilters)new MutationObserver(polishStaticUi).observe(partnerFilters,{childList:true,subtree:true});
+  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{polishStaticUi();schedule();bindExclusiveMenus('#promos');bindExclusiveMenus('#partners');},80));
   window.saveflowRefreshPromoBankFilter=schedule;
 })();
