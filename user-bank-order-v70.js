@@ -35,11 +35,11 @@
   function reorderMatrix(order){
     const table=document.querySelector('#categories .matrix-card table');
     const row=table?.querySelector('thead tr');
-    if(!table||!row||applying)return;
+    if(!table||!row||applying)return false;
     const ths=[...row.children].slice(1);
     const names=ths.map(th=>norm(th.querySelector('.bank-name')?.textContent||th.textContent));
     const desired=normalizedOrder(order,names);
-    if(desired.join('\n')===names.join('\n'))return;
+    if(desired.join('\n')===names.join('\n'))return false;
 
     const thByName=new Map(ths.map((th,i)=>[names[i],th]));
     const bodyRows=[...table.querySelectorAll('tbody tr')];
@@ -55,6 +55,7 @@
         desired.forEach(name=>{const td=cellMaps[ri].get(name);if(td)tr.appendChild(td);});
       });
     }finally{applying=false;}
+    return true;
   }
 
   function applyOrder(){
@@ -64,12 +65,14 @@
     const desired=role()==='user'
       ? normalizedOrder(loadOrder(),names)
       : normalizedOrder(globalOrder,names);
-    reorderMatrix(desired);
-    setTimeout(()=>{
-      window.saveflowApplyUserBanks?.();
-      window.saveflowApplyMatrixOverrides?.();
-      window.saveflowApplyExtraBankOverrides?.();
-    },0);
+    const changed=reorderMatrix(desired);
+    if(changed){
+      setTimeout(()=>{
+        window.saveflowApplyUserBanks?.();
+        window.saveflowApplyMatrixOverrides?.();
+        window.saveflowApplyExtraBankOverrides?.();
+      },0);
+    }
   }
 
   async function saveCloud(order){
@@ -137,7 +140,11 @@
     const byName=new Map(labels.map(label=>[norm(label.querySelector('input[type="checkbox"]')?.value),label]));
     const current=labels.map(label=>norm(label.querySelector('input[type="checkbox"]')?.value));
     const desired=normalizedOrder(loadOrder(),current);
-    desired.forEach(name=>{const label=byName.get(name);if(label)grid.appendChild(label);});
+    if(desired.join('\n')!==current.join('\n')){
+      applying=true;
+      try{desired.forEach(name=>{const label=byName.get(name);if(label)grid.appendChild(label);});}
+      finally{applying=false;}
+    }
 
     [...grid.querySelectorAll('.user-bank-check')].forEach(label=>{
       const input=label.querySelector('input[type="checkbox"]');
