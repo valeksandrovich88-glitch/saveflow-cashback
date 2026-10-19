@@ -119,7 +119,7 @@
 
   function ensureColumns(){
     if(ensuring)return;
-    const table=document.querySelector('#matrixTable');
+    const table=document.querySelector('#categories .matrix-card table');
     const headRow=table?.querySelector('thead tr');
     if(!table||!headRow)return;
     ensuring=true;
@@ -152,7 +152,7 @@
   function applyExtraOverrides(){
     const admin=parse(ADMIN_KEY,{});
     const personal=role()==='user'?parse(USER_KEY,{}):{};
-    document.querySelectorAll('#matrixTable tbody td[data-sf-extra-bank]').forEach(td=>{
+    document.querySelectorAll('#categories .matrix-card table tbody td[data-sf-extra-bank]').forEach(td=>{
       const key=cellKey(td);
       const ov=Object.prototype.hasOwnProperty.call(personal,key)?personal[key]:admin[key];
       const base=baseHtml.get(key)||'<span class="dash">—</span>';
@@ -233,7 +233,7 @@
 
   function bindExtraEditor(){
     document.addEventListener('click',e=>{
-      const td=e.target.closest?.('#matrixTable tbody td[data-sf-extra-bank]');
+      const td=e.target.closest?.('#categories .matrix-card table tbody td[data-sf-extra-bank]');
       if(td&&document.querySelector('#categories .matrix-card')?.classList.contains('matrix-editing')){
         e.preventDefault();
         openExtraEditor(td);
@@ -340,6 +340,27 @@
     return true;
   }
 
+  let bvrQueued=false;
+  function ensureBvrPartners(){
+    const grid=document.querySelector('#partners .partner-grid');
+    if(!grid)return;
+    const cards=[...grid.querySelectorAll('.partner-card')].filter(x=>
+      norm(x.dataset.bank||x.querySelector('.partner-bank > span:last-child')?.textContent)==='Банк Власний Рахунок'
+    );
+    const names=new Set(cards.map(x=>norm(x.dataset.partner||x.querySelector('.partner-name')?.textContent)));
+    if(cards.length!==BVR_PARTNERS.length||BVR_PARTNERS.some(x=>!names.has(x.name)))injectBvrPartners();
+  }
+  function bindBvrObserver(){
+    const grid=document.querySelector('#partners .partner-grid');
+    if(!grid||grid.dataset.sfBvrObserver==='1')return;
+    grid.dataset.sfBvrObserver='1';
+    new MutationObserver(()=>{
+      if(bvrQueued)return;
+      bvrQueued=true;
+      setTimeout(()=>{bvrQueued=false;ensureBvrPartners();},90);
+    }).observe(grid,{childList:true});
+  }
+
   const originalApply=window.saveflowApplyMatrixOverrides;
   if(originalApply&&!originalApply.__sfExtraWrapped){
     const wrapped=function(...args){
@@ -354,11 +375,12 @@
   ensureColumns();
   bindExtraEditor();
   injectBvrPartners();
-  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{ensureColumns();applyExtraOverrides();injectBvrPartners();},100));
+  bindBvrObserver();
+  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{ensureColumns();applyExtraOverrides();injectBvrPartners();bindBvrObserver();},100));
   new MutationObserver(()=>{
     if(ensuring)return;
     ensureColumns();
-  }).observe(document.querySelector('#matrixTable')||document.body,{childList:true,subtree:true});
+  }).observe(document.querySelector('#categories .matrix-card table')||document.body,{childList:true,subtree:true});
   window.saveflowApplyExtraBankOverrides=applyExtraOverrides;
-  window.saveflowEnsureExtraBanks=()=>{ensureColumns();applyExtraOverrides();injectBvrPartners();};
+  window.saveflowEnsureExtraBanks=()=>{ensureColumns();applyExtraOverrides();injectBvrPartners();bindBvrObserver();};
 })();
