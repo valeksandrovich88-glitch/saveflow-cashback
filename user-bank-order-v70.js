@@ -4,6 +4,8 @@
   let applying=false;
   let globalOrder=[];
   let dragName='';
+  let draftOrder=null;
+  let draftActive=false;
 
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
   function headerName(th){
@@ -151,6 +153,7 @@
       const next=label.nextElementSibling;
       if(next)grid.insertBefore(next,label);
     }
+    draftOrder=gridOrder();
     refreshNumbers();
   }
 
@@ -162,7 +165,7 @@
 
     const byName=new Map(labels.map(label=>[norm(label.querySelector('input[type="checkbox"]')?.value),label]));
     const current=labels.map(label=>norm(label.querySelector('input[type="checkbox"]')?.value));
-    const desired=normalizedOrder(loadOrder(),current);
+    const desired=normalizedOrder(draftActive&&Array.isArray(draftOrder)?draftOrder:loadOrder(),current);
     if(desired.join('\n')!==current.join('\n')){
       applying=true;
       try{desired.forEach(name=>{const label=byName.get(name);if(label)grid.appendChild(label);});}
@@ -172,7 +175,7 @@
     [...grid.querySelectorAll('.user-bank-check')].forEach(label=>{
       const input=label.querySelector('input[type="checkbox"]');
       const name=norm(input?.value);
-      let nameSpan=[...label.children].find(x=>x.tagName==='SPAN'&&!x.classList.contains('sf-bank-order-controls'));
+      let nameSpan=[...label.children].find(x=>x.tagName==='SPAN'&&!x.classList.contains('sf-bank-order-controls')&&!x.classList.contains('sf-bank-order-number'));
       if(nameSpan)nameSpan.classList.add('sf-bank-order-name');
       label.draggable=true;
       label.dataset.sfBankOrderName=name;
@@ -182,6 +185,8 @@
         controls.className='sf-bank-order-controls';
         controls.innerHTML='<button type="button" class="sf-bank-move" data-dir="-1" aria-label="Посунути банк вліво">↑</button><button type="button" class="sf-bank-move" data-dir="1" aria-label="Посунути банк вправо">↓</button><span class="sf-bank-drag" aria-hidden="true">≡</span>';
         label.appendChild(controls);
+        const handle=controls.querySelector('.sf-bank-drag');
+        if(handle)handle.draggable=true;
         controls.querySelectorAll('.sf-bank-move').forEach(btn=>btn.addEventListener('click',e=>{
           e.preventDefault();e.stopPropagation();
           moveLabel(label,Number(btn.dataset.dir||0));
@@ -206,6 +211,7 @@
           const rect=label.getBoundingClientRect();
           const after=e.clientY>rect.top+rect.height/2;
           grid.insertBefore(source,after?label.nextSibling:label);
+          draftOrder=gridOrder();
           refreshNumbers();
         });
       }
@@ -217,10 +223,25 @@
     const order=gridOrder();
     if(!order.length)return;
     localStorage.setItem(ORDER_KEY,JSON.stringify(order));
+    draftOrder=[...order];
     saveCloud(order);
     applyOrder();
-    setTimeout(applyOrder,80);
+    setTimeout(()=>{
+      draftActive=false;
+      draftOrder=null;
+      applyOrder();
+    },120);
     window.saveflowLogChange?.({scope:'user',section:'Профіль',action:'Змінено порядок банків',target:order.join(' → ')});
+  }
+  function beginDraft(){
+    const current=gridOrder();
+    draftActive=true;
+    draftOrder=normalizedOrder(loadOrder(),current.length?current:headers());
+    setTimeout(enhanceGrid,0);
+  }
+  function cancelDraft(){
+    draftActive=false;
+    draftOrder=null;
   }
 
   const st=document.createElement('style');
@@ -252,8 +273,11 @@
   if(copy)copy.textContent='Обери банки та розстав їх зверху вниз. Такий самий порядок буде в матриці зліва направо. Використовуй ↑ / ↓ або перетягуй рядки.';
 
   if(grid)new MutationObserver(()=>setTimeout(enhanceGrid,0)).observe(grid,{childList:true});
-  document.getElementById('userBanksOpen')?.addEventListener('click',()=>setTimeout(enhanceGrid,0));
-  document.getElementById('userBanksSave')?.addEventListener('click',()=>setTimeout(saveFromModal,0));
+  document.getElementById('userBanksOpen')?.addEventListener('click',beginDraft);
+  document.getElementById('userBanksSave')?.addEventListener('click',saveFromModal);
+  document.getElementById('userBanksCancel')?.addEventListener('click',cancelDraft);
+  document.getElementById('userBanksClose')?.addEventListener('click',cancelDraft);
+  modal?.addEventListener('click',e=>{if(e.target===modal)cancelDraft();});
 
   new MutationObserver(()=>setTimeout(applyOrder,0)).observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
   const table=document.querySelector('#categories .matrix-card table');
