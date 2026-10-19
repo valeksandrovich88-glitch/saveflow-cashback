@@ -103,6 +103,28 @@
 
   function signedIn(){return !!window.saveflowAuthState?.session?.user;}
   function currentRole(){return document.documentElement.dataset.saveflowRole||'public';}
+
+  // V52 cloud hydration still calls the legacy name after replacing
+  // saveflow.userMatrixOverrides.v1. Keep it as a live alias to the current
+  // renderer so cloud-hydrated personal data immediately repaints global → personal.
+  window.saveflowMatrixApplyOverrides=function(...args){
+    return window.saveflowApplyMatrixOverrides?.(...args);
+  };
+
+  const PERSONAL_OVERRIDE_KEY='saveflow.userMatrixOverrides.v1';
+  const sfNativeSetItem=Storage.prototype.setItem;
+  if(!Storage.prototype.__sfPersonalMatrixRenderHook){
+    const hookedSetItem=function(key,value){
+      const out=sfNativeSetItem.call(this,key,value);
+      if(this===localStorage&&key===PERSONAL_OVERRIDE_KEY){
+        queueMicrotask(()=>window.saveflowApplyMatrixOverrides?.());
+      }
+      return out;
+    };
+    hookedSetItem.__sfPersonalMatrixRenderHook=true;
+    Storage.prototype.setItem=hookedSetItem;
+    Storage.prototype.__sfPersonalMatrixRenderHook=true;
+  }
   function profileRole(){return window.saveflowAuthState?.profile?.role||window.saveflowCloud?.profile?.role||currentRole();}
   function isAdminEditing(){return profileRole()==='admin'&&document.body.classList.contains('site-editing');}
   let adminMatrixEditActive=false;
