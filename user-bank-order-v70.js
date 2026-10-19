@@ -7,7 +7,7 @@
 
   const norm=s=>String(s||'').replace(/\s+/g,' ').trim();
   function headers(){
-    return [...document.querySelectorAll('#matrixTable thead th')].slice(1)
+    return [...document.querySelectorAll('#categories .matrix-card table thead th')].slice(1)
       .map(th=>norm(th.querySelector('.bank-name')?.textContent||th.textContent)).filter(Boolean);
   }
   function loadOrder(){
@@ -33,7 +33,7 @@
   function role(){return document.documentElement.dataset.saveflowRole||'public';}
 
   function reorderMatrix(order){
-    const table=document.getElementById('matrixTable');
+    const table=document.querySelector('#categories .matrix-card table');
     const row=table?.querySelector('thead tr');
     if(!table||!row||applying)return;
     const ths=[...row.children].slice(1);
@@ -222,7 +222,7 @@
   document.getElementById('userBanksSave')?.addEventListener('click',()=>setTimeout(saveFromModal,0));
 
   new MutationObserver(()=>setTimeout(applyOrder,0)).observe(document.documentElement,{attributes:true,attributeFilter:['data-saveflow-role']});
-  const table=document.getElementById('matrixTable');
+  const table=document.querySelector('#categories .matrix-card table');
   if(table)new MutationObserver(()=>{if(!applying)setTimeout(applyOrder,0);}).observe(table,{childList:true,subtree:true});
 
   window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{pullCloud();applyOrder();},120));
