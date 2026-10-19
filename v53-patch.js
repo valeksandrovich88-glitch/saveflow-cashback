@@ -260,6 +260,32 @@
   // Track role changes made by the existing V52 role controller.
   let lastObservedRole=currentRole();
   let matrixRefreshSeq=0;
+
+  async function refreshPersonalMatrixFromCloud(){
+    const cloud=window.saveflowCloud;
+    const client=cloud?.client;
+    const userId=cloud?.session?.user?.id||window.saveflowAuthState?.session?.user?.id;
+    if(!client||!userId)return false;
+    const {data,error}=await client
+      .from('user_matrix_overrides')
+      .select('cell_key,value,note,valid_until,is_best,is_empty,updated_at')
+      .eq('user_id',userId);
+    if(error)throw error;
+    const next={};
+    (data||[]).forEach(r=>{
+      next[r.cell_key]={
+        value:r.value||'',
+        note:r.note||'',
+        end:r.valid_until||'',
+        best:!!r.is_best,
+        empty:!!r.is_empty,
+        updatedAt:r.updated_at
+      };
+    });
+    localStorage.setItem(PERSONAL_OVERRIDE_KEY,JSON.stringify(next));
+    return true;
+  }
+
   function reapplyMatrixLayers({pull=false}={}){
     const seq=++matrixRefreshSeq;
     const apply=()=>{
@@ -272,9 +298,11 @@
     (async()=>{
       try{
         await window.saveflowGlobalCloud?.pull?.();
-        await window.saveflowCloud?.pullUserCloud?.();
+        const refreshed=await refreshPersonalMatrixFromCloud();
+        if(!refreshed)await window.saveflowCloud?.pullUserCloud?.();
       }catch(e){
         console.warn('SaveFlow matrix layer refresh',e);
+        try{await window.saveflowCloud?.pullUserCloud?.();}catch(_){}
       }finally{
         settle();
       }
