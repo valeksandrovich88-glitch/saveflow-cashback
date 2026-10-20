@@ -283,9 +283,38 @@
   const table=document.querySelector('#categories .matrix-card table');
   if(table)new MutationObserver(()=>{if(!applying)setTimeout(applyOrder,0);}).observe(table,{childList:true,subtree:true});
 
-  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{pullCloud();applyOrder();},120));
+  // Compatibility migration: GlobusPlus existed in the matrix but could be
+  // absent from older personal bank selections. In user mode that made the
+  // whole column disappear immediately after leaving Admin mode.
+  function ensureGlobusPlusVisible(){
+    const name='GlobusPlus';
+    let selected=[];
+    try{
+      const x=JSON.parse(localStorage.getItem(BANKS_KEY)||'[]');
+      if(Array.isArray(x))selected=x.map(norm).filter(Boolean);
+    }catch(_){}
+    if(selected.length&&!selected.includes(name)){
+      selected.push(name);
+      localStorage.setItem(BANKS_KEY,JSON.stringify(selected));
+    }
+
+    const grid=document.getElementById('userBanksGrid');
+    if(grid&&!grid.querySelector('input[type="checkbox"][value="GlobusPlus"]')){
+      const label=document.createElement('label');
+      label.className='user-bank-check';
+      label.innerHTML='<input type="checkbox" value="GlobusPlus"><span>GlobusPlus</span>';
+      grid.appendChild(label);
+    }
+    const input=grid?.querySelector('input[type="checkbox"][value="GlobusPlus"]');
+    if(input&&selected.includes(name))input.checked=true;
+
+    window.saveflowApplyUserBanks?.();
+    enhanceGrid();
+  }
+
+  window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{pullCloud();applyOrder();ensureGlobusPlusVisible();},120));
   window.saveflowApplyUserBankOrder=applyOrder;
   window.saveflowPullUserBankOrder=pullCloud;
 
-  setTimeout(()=>{captureGlobalOrder();applyOrder();enhanceGrid();if(window.saveflowCloud?.session?.user)pullCloud();},80);
+  setTimeout(()=>{captureGlobalOrder();ensureGlobusPlusVisible();applyOrder();enhanceGrid();if(window.saveflowCloud?.session?.user)pullCloud();},80);
 })();
