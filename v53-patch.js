@@ -244,105 +244,6 @@
     if(hint)hint.textContent=globalEditing?'Глобальні зміни бачать усі':'Персональні зміни бачиш тільки ти';
   }
 
-  const SF_ADMIN_OVERRIDES='saveflow.matrixOverrides.v1';
-  const SF_USER_OVERRIDES='saveflow.userMatrixOverrides.v1';
-  let manualLayerQueued=false;
-  let manualLayerApplying=false;
-
-  function sfReadObject(key){
-    try{
-      const x=JSON.parse(localStorage.getItem(key)||'{}');
-      return x&&typeof x==='object'&&!Array.isArray(x)?x:{};
-    }catch(_){return {};}
-  }
-  function sfEsc(s){
-    return String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-  }
-  function sfStampMatrixBanks(){
-    const table=document.querySelector('#categories .matrix-card table');
-    if(!table)return;
-    const heads=[...table.querySelectorAll('thead th')];
-    const names=heads.map((th,i)=>{
-      if(i===0)return '';
-      const n=String(th.dataset.sfBankOrderName||th.querySelector('.bank-name')?.textContent||th.textContent||'').replace(/\s+/g,' ').trim();
-      if(n){
-        th.dataset.sfBankOrderName=n;
-        th.dataset.sfBankName=n;
-      }
-      return n;
-    });
-    table.querySelectorAll('tbody tr').forEach(tr=>{
-      [...tr.children].forEach((td,i)=>{
-        if(i===0)return;
-        if(!td.dataset.sfBankName&&names[i])td.dataset.sfBankName=names[i];
-      });
-    });
-  }
-  function sfRenderManualOverride(ov){
-    if(!ov||ov.empty||!String(ov.value||'').trim())return '<span class="dash">—</span>';
-    if(ov.end&&new Date(ov.end+'T23:59:59')<new Date())return '<span class="dash">—</span>';
-    const classes=['cash'];
-    if(ov.best)classes.push('best');
-    if(ov.note)classes.push('has-scope');
-    const attrs=[
-      ov.end?' data-end="'+sfEsc(ov.end)+'"':'',
-      ov.source?' data-source="'+sfEsc(ov.source)+'"':'',
-      ov.sourceTier?' data-source-tier="'+sfEsc(ov.sourceTier)+'"':'',
-      ov.checked?' data-checked="'+sfEsc(ov.checked)+'"':''
-    ].join('');
-    const tip=ov.note?'<span class="scope-badge" tabindex="0" aria-label="'+sfEsc(ov.note)+'" data-tip="'+sfEsc(ov.note)+'">?</span>':'';
-    return '<div class="'+classes.join(' ')+'"'+attrs+'><span class="cash-value">'+sfEsc(ov.value)+'</span>'+tip+'</div>';
-  }
-  function sfApplyAuthoritativeManualLayer(){
-    if(manualLayerApplying)return;
-    manualLayerApplying=true;
-    try{
-      sfStampMatrixBanks();
-      const admin=sfReadObject(SF_ADMIN_OVERRIDES);
-      const personal=currentRole()==='user'?sfReadObject(SF_USER_OVERRIDES):{};
-      document.querySelectorAll('#categories .matrix-card table tbody tr').forEach(tr=>{
-        const category=String(tr.querySelector('.category strong')?.textContent||tr.children[0]?.textContent||'').replace(/\s+/g,' ').trim();
-        [...tr.children].slice(1).forEach(td=>{
-          const bank=String(td.dataset.sfBankName||td.dataset.sfExtraBank||'').replace(/\s+/g,' ').trim();
-          if(!bank)return;
-          const key=category+'|||'+bank;
-          const hasPersonal=Object.prototype.hasOwnProperty.call(personal,key);
-          const hasAdmin=Object.prototype.hasOwnProperty.call(admin,key);
-          const ov=hasPersonal?personal[key]:(hasAdmin?admin[key]:null);
-          if(!ov)return;
-          const html=sfRenderManualOverride(ov);
-          if(td.innerHTML!==html)td.innerHTML=html;
-          td.classList.toggle('user-edited',!!ov);
-          td.classList.toggle('user-personal-edited',hasPersonal);
-          td.dataset.sfManualLayer=hasPersonal?'personal':'global';
-        });
-      });
-    }finally{
-      manualLayerApplying=false;
-    }
-  }
-  function sfQueueManualLayer(){
-    if(manualLayerQueued)return;
-    manualLayerQueued=true;
-    requestAnimationFrame(()=>{
-      manualLayerQueued=false;
-      sfApplyAuthoritativeManualLayer();
-    });
-  }
-  window.saveflowApplyAuthoritativeManualLayer=sfApplyAuthoritativeManualLayer;
-
-  const matrixRoot=document.querySelector('#categories .matrix-card table');
-  if(matrixRoot){
-    const matrixObserver=new MutationObserver(muts=>{
-      if(manualLayerApplying)return;
-      if(muts.some(m=>m.type==='childList'||m.type==='attributes'))sfQueueManualLayer();
-    });
-    matrixObserver.observe(matrixRoot,{subtree:true,childList:true,attributes:true,attributeFilter:['class','data-saveflow-role']});
-  }
-  window.addEventListener('storage',e=>{
-    if(e.key===SF_ADMIN_OVERRIDES||e.key===SF_USER_OVERRIDES)sfQueueManualLayer();
-  });
-
   const tidyAccount=()=>{
     const state=window.saveflowAuthState;
     const signed=!!state?.session?.user;
@@ -391,7 +292,6 @@
       if(seq!==matrixRefreshSeq)return;
       window.saveflowApplyMatrixOverrides?.();
       window.saveflowApplyExtraBankOverrides?.();
-      window.saveflowApplyAuthoritativeManualLayer?.();
     };
     const settle=()=>[0,80,260,700].forEach(ms=>setTimeout(apply,ms));
     if(!pull){settle();return;}
@@ -429,7 +329,6 @@
   window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>reapplyMatrixLayers({pull:true}),60));
   tidyAccount();
   reapplyMatrixLayers();
-  sfQueueManualLayer();
 
   // Do not show redundant success confirmations after a successful sign-in.
   const authMsg=document.getElementById('authMessage');
