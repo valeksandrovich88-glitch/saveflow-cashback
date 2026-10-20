@@ -43,10 +43,13 @@
   }
   function effective(admin,personal,key){
     if(role()==='user'&&Object.prototype.hasOwnProperty.call(personal,key)){
-      return {ov:liveOverride(personal[key]),layer:'personal',present:true};
+      const personalOv=liveOverride(personal[key]);
+      if(personalOv)return {ov:personalOv,layer:'personal',present:true};
+      // Invalid/expired personal data must never mask a valid global override.
     }
     if(Object.prototype.hasOwnProperty.call(admin,key)){
-      return {ov:liveOverride(admin[key]),layer:'global',present:true};
+      const globalOv=liveOverride(admin[key]);
+      if(globalOv)return {ov:globalOv,layer:'global',present:true};
     }
     return {ov:null,layer:'',present:false};
   }
