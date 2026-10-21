@@ -14,7 +14,7 @@
   }
   function logoMarkup(name){
     if(name==='monobank'){
-      const mono='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 24"><rect x=".5" y=".5" width="43" height="23" rx="5.5" fill="#0b0b0b"/><text x="22" y="12.6" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="11.5" font-weight="800" fill="#fff">mono</text></svg>';
+      const mono='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#313745"/><stop offset="100%" stop-color="#171a22"/></linearGradient></defs><rect x="2" y="2" width="60" height="60" rx="18" fill="url(#g)"/><text x="32" y="33.5" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="18" font-weight="800" fill="#fff">mono</text></svg>';
       return '<img src="data:image/svg+xml;charset=utf-8,'+encodeURIComponent(mono)+'" alt="" loading="lazy">';
     }
     if(name==='izibank') return svg(name);
