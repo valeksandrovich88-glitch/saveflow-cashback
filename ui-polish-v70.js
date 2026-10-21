@@ -51,6 +51,61 @@
       display:none!important;
       content:none!important;
     }
+
+    /* Compact matrix: keep more categories visible in one desktop viewport. */
+    #categories .matrix-card table thead tr{height:36px!important}
+    #categories .matrix-card table tbody tr{height:34px!important}
+    #categories .matrix-card table th,
+    #categories .matrix-card table td{
+      padding:3px 6px!important;
+      min-height:0!important;
+      height:34px!important;
+      line-height:1.08!important;
+      vertical-align:middle!important;
+    }
+    #categories .matrix-card table thead th{
+      height:36px!important;
+      font-size:9px!important;
+    }
+    #categories .matrix-card table tbody td:first-child{
+      font-size:10px!important;
+      line-height:1.1!important;
+    }
+    #categories .matrix-card .cash{
+      min-height:23px!important;
+      padding:3px 6px!important;
+      border-radius:9px!important;
+      box-sizing:border-box!important;
+      display:flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+    }
+    #categories .matrix-card .cash-value{
+      font-size:10px!important;
+      line-height:1!important;
+    }
+    #categories .matrix-card .scope-badge{
+      transform:scale(.82);
+      transform-origin:center;
+    }
+    #categories .matrix-card .bank-head{
+      gap:2px!important;
+      line-height:1!important;
+    }
+    #categories .matrix-card .bank-head .sf-bank-name-with-logo>.sf-inline-logo{
+      width:40px!important;
+      height:24px!important;
+      flex-basis:40px!important;
+    }
+    #categories .matrix-card .bank-head .sf-bank-name-with-logo{
+      gap:4px!important;
+      line-height:1!important;
+    }
+    @media(max-width:760px){
+      #categories .matrix-card table tbody tr{height:32px!important}
+      #categories .matrix-card table th,
+      #categories .matrix-card table td{height:32px!important;padding:3px 5px!important}
+    }
     #categories th[data-sf-extra-bank="Банк Власний Рахунок"] .sf-inline-logo,
     #categories th[data-sf-extra-bank="Картка Rozetka"] .sf-inline-logo{
       width:22px!important;
