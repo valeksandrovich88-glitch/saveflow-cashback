@@ -13,7 +13,7 @@
     return '<svg viewBox="0 0 28 28"><rect x=".5" y=".5" width="27" height="27" rx="8" fill="'+esc(bg)+'" stroke="rgba(255,255,255,.28)"/><text x="14" y="14.7" text-anchor="middle" dominant-baseline="middle" font-family="Arial" font-size="'+fs+'" font-weight="800" fill="'+esc(fg)+'">'+esc(mark)+'</text></svg>';
   }
   function logoMarkup(name){
-    if(name==='izibank') return svg(name);
+    if(name==='izibank'||name==='monobank') return svg(name);
     const src=window.SAVEFLOW_BANK_LOGOS?.[name];
     if(src) return '<img src="'+src+'" alt="" loading="lazy">';
     return svg(name);
