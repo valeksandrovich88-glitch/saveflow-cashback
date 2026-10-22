@@ -1,7 +1,14 @@
 (()=>{
-  const OFFERS=[{name:"OnTaxi",category:"Таксі",rate:10,rateText:"10%",note:"До 500 грн кешбеку · власні та кредитні кошти"}];
+  const OFFERS=[
+    {name:"OnTaxi",category:"Таксі",rate:10,rateText:"10%",note:"До 500 грн кешбеку · власні та кредитні кошти",source:"https://globusplus.ua/cashback"},
+    {name:"АТБ",category:"Продукти",rate:6,rateText:"6%",note:"Перше онлайн-замовлення",source:"https://globusplus.ua/blog/zhovtnevi-katehoriyi-keshbeku-ta-novi-propozytsiyi"},
+    {name:"ROOLER",category:"Автотовари та сервіси",rate:6,rateText:"6%",note:"Онлайн-покупки",source:"https://globusplus.ua/blog/zhovtnevi-katehoriyi-keshbeku-ta-novi-propozytsiyi"},
+    {name:"Yves Rocher",category:"Краса",rate:7,rateText:"7%",note:"Онлайн-покупки",source:"https://globusplus.ua/blog/zhovtnevi-katehoriyi-keshbeku-ta-novi-propozytsiyi"}
+  ];
   const BANK='GlobusPlus';
-  const SOURCE='https://globusplus.ua/cashback';
+  const MONTH='2026-10';
+  const START='2026-10-01';
+  const END='2026-10-31';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm=s=>String(s||'').toLocaleLowerCase('uk-UA').trim();
   let scheduled=false;
@@ -14,9 +21,12 @@
     el.dataset.partner=o.name;
     el.dataset.rate=String(o.rate);
     el.dataset.sfGlobusCurrent='1';
-    el.dataset.sfSource=SOURCE;
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек GlobusPlus'].join(' '));
-    el.title='Офіційно підтверджений партнер GlobusPlus';
+    el.dataset.sfSource=o.source;
+    el.dataset.sfMonth=MONTH;
+    el.dataset.start=START;
+    el.dataset.end=END;
+    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек GlobusPlus жовтень 2026'].join(' '));
+    el.title='Офіційно підтверджений партнер GlobusPlus · жовтень 2026';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">G</span></span><span>GlobusPlus</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
@@ -39,11 +49,15 @@
       bankPop.appendChild(label);
     }
     const catPop=section.querySelector('#categoryFilterLabel')?.closest('details')?.querySelector('.filter-pop');
-    if(catPop&&!catPop.querySelector('[data-category-value="Таксі"]')){
-      const label=document.createElement('label');
-      label.className='check-row';
-      label.innerHTML='<input type="checkbox" data-category-value="Таксі"><span>Таксі</span>';
-      catPop.appendChild(label);
+    if(catPop){
+      const existing=new Set([...catPop.querySelectorAll('[data-category-value]')].map(x=>x.getAttribute('data-category-value')));
+      [...new Set(OFFERS.map(x=>x.category))].forEach(cat=>{
+        if(existing.has(cat))return;
+        const label=document.createElement('label');
+        label.className='check-row';
+        label.innerHTML='<input type="checkbox" data-category-value="'+esc(cat)+'"><span>'+esc(cat)+'</span>';
+        catPop.appendChild(label);
+      });
     }
   }
 
@@ -58,7 +72,7 @@
     grid.appendChild(frag);
     section.dataset.sfGlobusOffers=String(OFFERS.length);
     section.dataset.sfGlobusLoaded='1';
-    setTimeout(()=>window.saveflowApplySensePartners?.(),0);
+    setTimeout(()=>window.saveflowRefreshBankFilters?.(),0);
     return true;
   }
 
