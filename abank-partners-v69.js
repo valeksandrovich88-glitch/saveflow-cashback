@@ -1,21 +1,43 @@
 (()=>{
-  const BANK='àбанк';
-  const SOURCE='https://a-bank.com.ua/services/cashback';
+  const BANK='А-Банк';
+  const SOURCE='https://finance.ua/ua/cards/cashback-review';
+  const MONTH='2026-11';
+  const START='2026-11-01';
+  const END='2026-11-30';
   const OFFERS=[
-    {name:'АТБ',category:'Продукти',note:'Найбільша українська мережа супермаркетів'},
-    {name:'WOG',category:'АЗС',note:'Мережа автозаправних комплексів гарного настрою'},
-    {name:'АНЦ',category:'Аптеки / здоров\'я',note:'Найбільша аптечна мережа України'},
-    {name:'MOYO',category:'Техніка',note:'Омніканальний ритейлер техніки й електроніки'},
-    {name:'Opti',category:'Таксі',note:'Мобільний застосунок для замовлення таксі'},
-    {name:'Master Zoo',category:'Тварини',note:'Мультибрендовий магазин товарів для тварин'},
-    {name:'Книгарня Є',category:'Книги та канцтовари',note:'Найбільший вибір літератури'},
-    {name:'Bomond.ua',category:'Краса',note:'Усі провідні світові бренди'},
-    {name:'Euroclub',category:'Транспорт',note:'Лідер на ринку світових перевезень'}
+    {name:'Yabluka',category:'Техніка',rate:5,rateText:'5%',note:'Максимальний кешбек 500 грн'},
+    {name:'WOG',category:'АЗС',rate:3,rateText:'3%',note:'Сервіси самообслуговування · максимум 500 грн'},
+    {name:'INTERTOP',category:'Одяг та взуття',rate:4,rateText:'4%',note:'Сайт та застосунок · максимум 200 грн'},
+    {name:'Balka Book',category:'Книги та канцтовари',rate:6,rateText:'6%',note:''},
+    {name:'ОН Клінік',category:"Аптеки / здоров'я",rate:5,rateText:'5%',note:'Від 1000 грн · максимум 500 грн'},
+    {name:'Книгарня Є',category:'Книги та канцтовари',rate:4,rateText:'4%',note:'Максимум 500 грн'},
+    {name:'Varus.ua',category:'Продукти',rate:7,rateText:'7%',note:'Онлайн-замовлення від 1500 грн'},
+    {name:'MOYO',category:'Техніка',rate:3,rateText:'3%',note:'Максимум 500 грн'},
+    {name:'Sushi Master',category:'Кафе та ресторани',rate:5,rateText:'5%',note:'Є регіональні винятки'},
+    {name:'Tickets.ua',category:'Транспорт',rate:3,rateText:'3%',note:'Максимум 500 грн'},
+    {name:'MEGOGO BOOKS',category:'Книги та канцтовари',rate:8,rateText:'8%',note:''},
+    {name:'Yves Rocher',category:'Краса',rate:7,rateText:'7%',note:''},
+    {name:'Кібернетики',category:'Техніка',rate:5,rateText:'5%',note:'Максимум 500 грн'},
+    {name:'KIMS',category:'Послуги',rate:10,rateText:'10%',note:'Максимум 500 грн'},
+    {name:'Vivat',category:'Книги та канцтовари',rate:7,rateText:'7%',note:''},
+    {name:'KTC.ua',category:'Техніка',rate:5,rateText:'5%',note:'Максимум 500 грн'},
+    {name:'KLR Bus',category:'Транспорт',rate:5,rateText:'5%',note:'Покупки на сайті klr.com.ua'},
+    {name:'Leroy Merlin',category:'Дім та ремонт',rate:3,rateText:'3%',note:'Онлайн-покупки · максимум 1000 грн'},
+    {name:'UkrArmor',category:'Одяг та взуття',rate:5,rateText:'5%',note:'Військове спорядження'},
+    {name:"Cher'17",category:'Одяг та взуття',rate:8,rateText:'8%',note:'Інтернет-покупки'},
+    {name:'Biblioteque de Parfum',category:'Краса',rate:12,rateText:'12%',note:'Максимум 500 грн'},
+    {name:'One by One',category:'Одяг та взуття',rate:8,rateText:'8%',note:''},
+    {name:'Mathema.me',category:'Освіта',rate:10,rateText:'10%',note:'Максимум 500 грн'},
+    {name:'Estro',category:'Одяг та взуття',rate:8,rateText:'8%',note:''},
+    {name:'Mr. Scrubber',category:'Краса',rate:10,rateText:'10%',note:''},
+    {name:'Lacoste.ua',category:'Одяг та взуття',rate:7,rateText:'7%',note:''},
+    {name:'Telemart',category:'Техніка',rate:3,rateText:'3%',note:'Максимум 500 грн'},
+    {name:'DUNA.ua',category:'Одяг та взуття',rate:6,rateText:'6%',note:''}
   ];
-  const VISIBLE_OFFERS=OFFERS.filter(o=>String(o.rateText||'').trim()||Number(o.rate)>0);
+
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm=s=>String(s||'').toLocaleLowerCase('uk-UA').replace(/\s+/g,' ').trim();
-  let scheduled=false;
+  let scheduled=false,busy=false;
 
   function makeCard(o){
     const el=document.createElement('article');
@@ -23,41 +45,39 @@
     el.dataset.bank=BANK;
     el.dataset.category=o.category;
     el.dataset.partner=o.name;
-    el.dataset.rate='0';
+    el.dataset.rate=String(o.rate);
     el.dataset.sfAbankCurrent='1';
     el.dataset.sfSource=SOURCE;
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек'].join(' '));
-    el.title='Офіційний партнер àбанку. Поточний відсоток залежить від актуальної пропозиції банку.';
+    el.dataset.sfMonth=MONTH;
+    el.dataset.start=START;
+    el.dataset.end=END;
+    el.dataset.search=norm([BANK,'àбанк',o.name,o.category,o.rateText,o.note,'партнерський кешбек листопад 2026'].join(' '));
+    el.title='A-Банк · партнерський кешбек · листопад 2026';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">à</span></span><span>'+BANK+'</span></div>'+
-      '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">—</div></div>'+
+      '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
       '<div class="tag">'+esc(o.category)+'</div>'+
-      '<div class="offer-note">'+esc(o.note)+'</div>';
+      (o.note?'<div class="offer-note">'+esc(o.note)+'</div>':'');
     return el;
   }
 
   function isAbank(card){
-    const bank=norm(card?.dataset?.bank||card?.querySelector?.('.partner-bank span:last-child')?.textContent||'');
-    return bank==='àбанк'||bank==='а-банк'||bank==='абанк';
+    const b=norm(card?.dataset?.bank||card?.querySelector?.('.partner-bank span:last-child')?.textContent||'');
+    return b==='а-банк'||b==='àбанк'||b==='абанк';
   }
 
   function ensureFilters(section){
     const bankPop=section.querySelector('#bankFilterLabel')?.closest('details')?.querySelector('.filter-pop');
-    const bankRows=bankPop?[...bankPop.querySelectorAll('label')].filter(l=>l.querySelector('[data-bank-value="'+BANK+'"]')):[];
-    if(!VISIBLE_OFFERS.length){
-      bankRows.forEach(x=>x.remove());
-      return;
-    }
-    if(bankPop&&!bankRows.length){
+    if(bankPop&&!bankPop.querySelector('[data-bank-value="А-Банк"]')){
       const label=document.createElement('label');
       label.className='check-row';
-      label.innerHTML='<input type="checkbox" data-bank-value="'+BANK+'"><span>'+BANK+'</span>';
+      label.innerHTML='<span class="tiny-logo-wrap"><span class="tiny-logo tiny-logo-fallback">à</span></span><input type="checkbox" data-bank-value="А-Банк"><span>А-Банк</span>';
       bankPop.appendChild(label);
     }
     const catPop=section.querySelector('#categoryFilterLabel')?.closest('details')?.querySelector('.filter-pop');
     if(catPop){
       const existing=new Set([...catPop.querySelectorAll('[data-category-value]')].map(x=>x.getAttribute('data-category-value')));
-      [...new Set(VISIBLE_OFFERS.map(x=>x.category))].forEach(cat=>{
+      [...new Set(OFFERS.map(x=>x.category))].forEach(cat=>{
         if(existing.has(cat))return;
         const label=document.createElement('label');
         label.className='check-row';
@@ -67,65 +87,47 @@
     }
   }
 
-  function ensureNote(section){
-    let note=section.querySelector('.sf-abank-partner-note');
-    if(!note){
-      note=document.createElement('div');
-      note.className='sf-abank-partner-note';
-      note.style.cssText='margin:10px 0 0;font-size:11px;line-height:1.45;color:#5f6d64;';
-      const grid=section.querySelector('.partner-grid');
-      grid?.insertAdjacentElement('afterend',note);
-    }
-    if(note){
-      note.textContent='Актуальні ставки і партнерські пропозиції можуть бути індивідуальними. Тому список може бути не повними.';
-    }
-  }
-
   function inject(){
+    if(busy)return false;
     const section=document.getElementById('partners');
     const grid=section?.querySelector('.partner-grid');
     if(!section||!grid)return false;
-    ensureFilters(section);
-    ensureNote(section);
-    [...grid.querySelectorAll('.partner-card')].filter(card=>{
-      if(!isAbank(card))return false;
-      const rate=norm(card.querySelector('.partner-rate')?.textContent||'');
-      return card.dataset.sfAbankCurrent==='1'||!rate||rate==='—';
-    }).forEach(x=>x.remove());
-    const frag=document.createDocumentFragment();
-    VISIBLE_OFFERS.forEach(o=>frag.appendChild(makeCard(o)));
-    grid.appendChild(frag);
-    section.dataset.sfAbankOffers=String(VISIBLE_OFFERS.length);
-    section.dataset.sfAbankLoaded='1';
-    return true;
+    busy=true;
+    try{
+      ensureFilters(section);
+      [...grid.querySelectorAll('.partner-card')].filter(isAbank).forEach(x=>x.remove());
+      const frag=document.createDocumentFragment();
+      OFFERS.forEach(o=>frag.appendChild(makeCard(o)));
+      grid.appendChild(frag);
+      section.dataset.sfAbankOffers=String(OFFERS.length);
+      section.dataset.sfAbankLoaded='1';
+      window.saveflowRefreshBankFilters?.();
+      return true;
+    }finally{busy=false}
   }
 
   function ensure(){
-    const section=document.getElementById('partners');
-    const grid=section?.querySelector('.partner-grid');
-    if(!section||!grid)return;
-    const cards=[...grid.querySelectorAll('.partner-card')].filter(isAbank);
-    const auto=cards.filter(x=>x.dataset.sfAbankCurrent==='1');
-    if(auto.length!==VISIBLE_OFFERS.length||auto.some(x=>!norm(x.querySelector('.partner-rate')?.textContent||'')||norm(x.querySelector('.partner-rate')?.textContent||'')==='—'))inject();
-    else{ensureFilters(section);ensureNote(section);}
-  }
-
-  function bindObserver(){
+    if(busy)return;
     const grid=document.querySelector('#partners .partner-grid');
-    if(!grid||grid.dataset.sfAbankObserver==='1')return;
-    grid.dataset.sfAbankObserver='1';
-    new MutationObserver(()=>{
-      if(scheduled)return;
-      scheduled=true;
-      setTimeout(()=>{scheduled=false;ensure();},80);
-    }).observe(grid,{childList:true});
+    if(!grid)return;
+    const cards=[...grid.querySelectorAll('.partner-card')].filter(isAbank);
+    const current=cards.filter(x=>x.dataset.sfAbankCurrent==='1');
+    if(current.length!==OFFERS.length||cards.some(x=>x.dataset.sfAbankCurrent!=='1'))inject();
   }
 
   function boot(){
     if(!inject())return setTimeout(boot,250);
-    bindObserver();
+    const grid=document.querySelector('#partners .partner-grid');
+    if(grid&&grid.dataset.sfAbankObserver!=='2'){
+      grid.dataset.sfAbankObserver='2';
+      new MutationObserver(()=>{
+        if(scheduled||busy)return;
+        scheduled=true;
+        setTimeout(()=>{scheduled=false;ensure();},80);
+      }).observe(grid,{childList:true});
+    }
     window.saveflowApplyAbankPartners=inject;
-    window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{inject();bindObserver();},120));
+    window.addEventListener('saveflow-auth-change',()=>setTimeout(ensure,120));
   }
   boot();
 })();
