@@ -4,6 +4,36 @@
   const START='2026-11-01';
   const END='2026-11-30';
   const SOURCE='monobank app · Кешбек від партнерів за листопад 2026';
+  const monoStyle=document.createElement('style');
+  monoStyle.id='saveflow-mono-partner-logo-v3';
+  monoStyle.textContent=`
+    .partner-card[data-bank="monobank"] .partner-bank{
+      gap:6px!important;
+    }
+    .partner-card[data-bank="monobank"] .partner-bank > :not(.sf-mono-partner-logo):not(:last-child){
+      display:none!important;
+    }
+    .partner-card[data-bank="monobank"] .sf-mono-partner-logo{
+      display:inline-grid!important;
+      place-items:center!important;
+      width:15px!important;
+      height:15px!important;
+      min-width:15px!important;
+      max-width:15px!important;
+      flex:0 0 15px!important;
+      overflow:visible!important;
+    }
+    .partner-card[data-bank="monobank"] .sf-mono-partner-logo svg{
+      display:block!important;
+      width:15px!important;
+      height:15px!important;
+      max-width:15px!important;
+      max-height:15px!important;
+      overflow:visible!important;
+    }
+  `;
+  document.getElementById(monoStyle.id)?.remove();
+  document.head.appendChild(monoStyle);
   const OFFERS=[
     {name:'ANSWEAR.ua',category:'Одяг та взуття',rate:8,rateText:'8%',note:'Онлайн-покупки'},
     {name:'Алло',category:'Техніка',rate:5,rateText:'5%',note:''},
@@ -50,7 +80,7 @@
     el.dataset.end=END;
     el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек monobank листопад 2026'].join(' '));
     el.title='monobank · партнерський кешбек за листопад 2026';
-    const monoLogo='<span class="sf-mono-partner-logo" aria-hidden="true" style="display:inline-grid;place-items:center;width:18px;height:18px;flex:0 0 18px;overflow:visible"><svg viewBox="0 0 20 20" width="18" height="18" style="display:block;width:18px;height:18px;overflow:visible"><rect x="1.5" y="1.5" width="17" height="17" rx="5" fill="#1b1f29"/><text x="10" y="10.6" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="6.3" font-weight="800" fill="#fff">mono</text></svg></span>';
+    const monoLogo='<span class="sf-mono-partner-logo" aria-hidden="true"><svg viewBox="0 0 20 20"><rect x="2.5" y="2.5" width="15" height="15" rx="4.4" fill="#1b1f29"/><text x="10" y="10.45" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="5.5" font-weight="800" fill="#fff">mono</text></svg></span>';
     el.innerHTML=
       '<div class="partner-bank">'+monoLogo+'<span>monobank</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
