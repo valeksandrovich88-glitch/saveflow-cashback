@@ -165,16 +165,18 @@
 
 (()=>{
   const OFFERS=[
-    {name:"WOG",category:"АЗС",rate:4,rateText:"4%",note:"Пальне, товари та смаколики"},
+    {name:"WOG",category:"АЗС",rate:6,rateText:"6%",note:"Пальне, товари та смаколики"},
     {name:"VARUS",category:"Продукти",rate:10,rateText:"10%",note:"Оплата в застосунку та на VARUS.UA"},
-    {name:"Фокстрот",category:"Техніка",rate:5,rateText:"5%",note:"Ґаджети та інша техніка"},
-    {name:"UPG",category:"АЗС",rate:4,rateText:"4%",note:"Пальне, страви, кава та товари"}
+    {name:"Фокстрот",category:"Техніка",rate:5,rateText:"5%",note:"Ґаджети та інша техніка"}
   ];
   const BANK='Банк Альянс';
   const SOURCE='https://alb.ua/personal/credit_cards';
+  const MONTH='2026-11';
+  const START='2026-11-01';
+  const END='2026-11-30';
   const esc=s=>String(s??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const norm=s=>String(s||'').toLocaleLowerCase('uk-UA').trim();
-  let scheduled=false;
+  let scheduled=false,busy=false;
 
   function makeCard(o){
     const el=document.createElement('article');
@@ -185,8 +187,11 @@
     el.dataset.rate=String(o.rate);
     el.dataset.sfAllianceCurrent='1';
     el.dataset.sfSource=SOURCE;
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек Alliance bank'].join(' '));
-    el.title='Поточна офіційна партнерська пропозиція Банк Альянс';
+    el.dataset.sfMonth=MONTH;
+    el.dataset.start=START;
+    el.dataset.end=END;
+    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек Alliance bank листопад 2026'].join(' '));
+    el.title='Банк Альянс · партнерський кешбек · листопад 2026';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">BA</span></span><span>Банк Альянс</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
@@ -194,10 +199,12 @@
       '<div class="offer-note">'+esc(o.note)+'</div>';
     return el;
   }
+
   function isAlliance(card){
     const b=norm(card?.dataset?.bank||card?.querySelector?.('.partner-bank span:last-child')?.textContent||'');
     return b==='банк альянс'||b==='alliance bank'||b==='alliance';
   }
+
   function ensureFilters(section){
     const bankPop=section.querySelector('#bankFilterLabel')?.closest('details')?.querySelector('.filter-pop');
     if(bankPop&&!section.querySelector('[data-bank-value="Банк Альянс"]')){
@@ -218,40 +225,47 @@
       });
     }
   }
+
   function inject(){
+    if(busy)return false;
     const section=document.getElementById('partners');
     const grid=section?.querySelector('.partner-grid');
     if(!section||!grid)return false;
-    ensureFilters(section);
-    [...grid.querySelectorAll('.partner-card')].filter(isAlliance).forEach(x=>x.remove());
-    const frag=document.createDocumentFragment();
-    OFFERS.forEach(o=>frag.appendChild(makeCard(o)));
-    grid.appendChild(frag);
-    section.dataset.sfAllianceOffers=String(OFFERS.length);
-    section.dataset.sfAllianceLoaded='1';
-    setTimeout(()=>window.saveflowApplySensePartners?.(),0);
-    return true;
+    busy=true;
+    try{
+      ensureFilters(section);
+      [...grid.querySelectorAll('.partner-card')].filter(isAlliance).forEach(x=>x.remove());
+      const frag=document.createDocumentFragment();
+      OFFERS.forEach(o=>frag.appendChild(makeCard(o)));
+      grid.appendChild(frag);
+      section.dataset.sfAllianceOffers=String(OFFERS.length);
+      section.dataset.sfAllianceLoaded='1';
+      window.saveflowRefreshBankFilters?.();
+      return true;
+    }finally{busy=false}
   }
+
   function ensure(){
+    if(busy)return;
     const grid=document.querySelector('#partners .partner-grid');
     if(!grid)return;
     const cards=[...grid.querySelectorAll('.partner-card')].filter(isAlliance);
     if(cards.filter(x=>x.dataset.sfAllianceCurrent==='1').length!==OFFERS.length||cards.some(x=>x.dataset.sfAllianceCurrent!=='1'))inject();
   }
-  function bindObserver(){
-    const grid=document.querySelector('#partners .partner-grid');
-    if(!grid)return;
-    new MutationObserver(()=>{
-      if(scheduled)return;
-      scheduled=true;
-      setTimeout(()=>{scheduled=false;ensure();},80);
-    }).observe(grid,{childList:true});
-  }
+
   function boot(){
     if(!inject())return setTimeout(boot,250);
-    bindObserver();
+    const grid=document.querySelector('#partners .partner-grid');
+    if(grid&&grid.dataset.sfAllianceObserver!=='2'){
+      grid.dataset.sfAllianceObserver='2';
+      new MutationObserver(()=>{
+        if(scheduled||busy)return;
+        scheduled=true;
+        setTimeout(()=>{scheduled=false;ensure();},80);
+      }).observe(grid,{childList:true});
+    }
     window.saveflowApplyAlliancePartners=inject;
-    window.addEventListener('saveflow-auth-change',()=>setTimeout(()=>{inject();bindObserver();},120));
+    window.addEventListener('saveflow-auth-change',()=>setTimeout(ensure,120));
   }
   boot();
 })();
