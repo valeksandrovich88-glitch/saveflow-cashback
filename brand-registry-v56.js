@@ -36,7 +36,7 @@
   const norm=s=>String(s||'').toLowerCase().replace(/[’'`]/g,'').replace(/\s+/g,' ').trim();
   const icon=b=>{
     if(b?.key==='mono'){
-      const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#313745"/><stop offset="100%" stop-color="#171a22"/></linearGradient></defs><rect x="3" y="3" width="58" height="58" rx="17" fill="url(#g)"/><text x="32" y="33.5" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="17.5" font-weight="800" fill="#fff">mono</text></svg>';
+      const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#313745"/><stop offset="100%" stop-color="#171a22"/></linearGradient></defs><rect x="8" y="8" width="56" height="56" rx="16" fill="url(#g)"/><text x="36" y="37.5" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="800" fill="#fff">mono</text></svg>';
       return 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
     }
     return `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent('https://'+b.domain)}`;
@@ -80,6 +80,17 @@
     .mini-logo-wrap{width:24px!important;height:24px!important;flex:0 0 24px!important}.bank-logo-wrap{width:28px!important;height:28px!important;margin:0 auto 4px!important}
     .mini-logo-wrap>svg,.mini-logo-wrap>img{width:24px!important;height:24px!important;display:block!important;object-fit:contain!important;max-width:24px!important;max-height:24px!important}.bank-logo-wrap>svg,.bank-logo-wrap>img{width:28px!important;height:28px!important;display:block!important;object-fit:contain!important;max-width:28px!important;max-height:28px!important}
     .mini-logo,.bank-logo,.mini-logo-fallback,.bank-logo-fallback{display:none!important}
+    .partner-card[data-bank="monobank"] .mini-logo-wrap,
+    .promo-card[data-bank="monobank"] .mini-logo-wrap{
+      width:18px!important;height:18px!important;flex:0 0 18px!important;
+      overflow:visible!important;
+    }
+    .partner-card[data-bank="monobank"] .mini-logo-wrap>img,
+    .promo-card[data-bank="monobank"] .mini-logo-wrap>img{
+      width:18px!important;height:18px!important;
+      max-width:18px!important;max-height:18px!important;
+      object-fit:contain!important;border-radius:0!important;
+    }
   `;
   document.head.appendChild(st);
 
