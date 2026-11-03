@@ -165,9 +165,10 @@
 
 (()=>{
   const OFFERS=[
-    {name:"WOG",category:"АЗС",rate:6,rateText:"6%",note:"Пальне, товари та смаколики"},
-    {name:"VARUS",category:"Продукти",rate:10,rateText:"10%",note:"Оплата в застосунку та на VARUS.UA"},
-    {name:"Фокстрот",category:"Техніка",rate:5,rateText:"5%",note:"Ґаджети та інша техніка"}
+    {name:"UPG",category:"АЗС",rate:4,rateText:"4%",note:"Пальне, страви від шефа, мммкава та товари магазину"},
+    {name:"WOG",category:"АЗС",rate:4,rateText:"4%",note:"Пальне, товари та смаколики"},
+    {name:"Фокстрот",category:"Техніка",rate:5,rateText:"5%",note:"Ґаджети та інша техніка"},
+    {name:"VARUS",category:"Продукти",rate:10,rateText:"10%",note:"Оплата карткою «Стартова» в застосунку та на VARUS.UA"}
   ];
   const BANK='Банк Альянс';
   const SOURCE='https://alb.ua/personal/credit_cards';
