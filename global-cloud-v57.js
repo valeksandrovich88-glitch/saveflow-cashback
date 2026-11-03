@@ -256,6 +256,10 @@
       const matrix={};(m||[]).forEach(r=>matrix[r.cell_key]=r.payload||{});
       nativeWrite(KEYS.matrix,matrix);
       for(const block of ['partner','promo','bonus']){
+        const blockItems=(items||[]).filter(r=>r.block===block);
+        // Partner cards are currently sourced from verified bank modules.
+        // An empty cloud partner block must not wipe those cards from local state.
+        if(block==='partner'&&!blockItems.length)continue;
         const rebuilt=reconstruct(items||[],block);
         nativeWrite(KEYS[block],rebuilt.store);
         if(block==='bonus')nativeWrite(KEYS.bonusLinks,rebuilt.refs);
@@ -265,6 +269,7 @@
       window.saveflowRenderPartners?.();
       window.saveflowRenderPromos?.();
       window.saveflowRenderBonuses?.();
+      [0,120,450].forEach(ms=>setTimeout(()=>window.saveflowStableReapply?.(),ms));
       adminHydrated=isAdmin();
       if(adminHydrated&&queuedKinds.size){
         const pending=[...queuedKinds];queuedKinds.clear();
