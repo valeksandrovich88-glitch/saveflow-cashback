@@ -1,34 +1,36 @@
 (()=>{
   const BANK='monobank';
-  const MONTH='2026-10';
-  const START='2026-10-01';
-  const END='2026-10-31';
-  const SOURCE='monobank app · Кешбек від партнерів за жовтень 2026';
+  const MONTH='2026-11';
+  const START='2026-11-01';
+  const END='2026-11-30';
+  const SOURCE='monobank app · Кешбек від партнерів за листопад 2026';
   const OFFERS=[
     {name:'ANSWEAR.ua',category:'Одяг та взуття',rate:8,rateText:'8%',note:'Онлайн-покупки'},
     {name:'Алло',category:'Техніка',rate:5,rateText:'5%',note:''},
     {name:'Фокстрот',category:'Техніка',rate:5,rateText:'5%',note:''},
+    {name:'WOG',category:'АЗС',rate:2,rateText:'2%',note:'На сервіси самообслуговування'},
+    {name:'Parallel',category:'АЗС',rate:3,rateText:'3%',note:''},
     {name:'Аптека оптових цін',category:"Аптеки / здоров'я",rate:5,rateText:'5%',note:''},
     {name:'Аптека 9-1-1',category:"Аптеки / здоров'я",rate:5,rateText:'5%',note:''},
-    {name:'Parallel',category:'АЗС',rate:3,rateText:'3%',note:''},
-    {name:'TAXI838',category:'Таксі',rate:10,rateText:'10%',note:''},
     {name:'fozzyshop.ua',category:'Продукти',rate:10,rateText:'10%',note:'Перша покупка'},
     {name:'Glovo',category:'Кафе та ресторани',rate:15,rateText:'15%',note:'Перше замовлення'},
-    {name:'Petslike.ua',category:'Тварини',rate:12,rateText:'12%',note:''},
-    {name:'Optimeal & Club4Paws',category:'Тварини',rate:12,rateText:'12%',note:'Онлайн-покупки'},
-    {name:'krkr.com.ua',category:'Краса',rate:7,rateText:'7%',note:'Онлайн-покупки'},
-    {name:'MEGOGO BOOKS',category:'Книги та канцтовари',rate:10,rateText:'10%',note:'Онлайн-покупки'},
-    {name:'PRM.com',category:'Одяг та взуття',rate:20,rateText:'20%',note:'Онлайн-покупки'},
+    {name:'PRM.com',category:'Одяг та взуття',rate:25,rateText:'25%',note:'Онлайн-покупки'},
     {name:'Calvin Klein',category:'Одяг та взуття',rate:10,rateText:'10%',note:''},
-    {name:'INTERTOP APP',category:'Одяг та взуття',rate:8,rateText:'8%',note:'Замовлення з застосунку'},
     {name:'Tommy Hilfiger',category:'Одяг та взуття',rate:10,rateText:'10%',note:''},
     {name:'Colins.ua',category:'Одяг та взуття',rate:10,rateText:'10%',note:'Онлайн-покупки'},
     {name:'Lacoste.ua',category:'Одяг та взуття',rate:8,rateText:'8%',note:''},
     {name:'DUNA.ua',category:'Одяг та взуття',rate:10,rateText:'10%',note:'Онлайн-покупки'},
+    {name:'INTERTOP APP',category:'Одяг та взуття',rate:6,rateText:'6%',note:'Замовлення з застосунку'},
+    {name:'Petslike.ua',category:'Тварини',rate:12,rateText:'12%',note:''},
+    {name:'Optimeal & Club4Paws',category:'Тварини',rate:12,rateText:'12%',note:'Онлайн-покупки'},
+    {name:'krkr.com.ua',category:'Краса',rate:7,rateText:'7%',note:'Онлайн-покупки'},
+    {name:'MEGOGO BOOKS',category:'Книги та канцтовари',rate:10,rateText:'10%',note:'Онлайн-покупки'},
+    {name:'Магазини Bosch',category:'Техніка',rate:10,rateText:'10%',note:''},
     {name:'KTC',category:'Техніка',rate:6,rateText:'6%',note:''},
-    {name:'Магазини Bosch',category:'Техніка',rate:7,rateText:'7%',note:''},
-    {name:'Teahouse.ua',category:'Продукти',rate:20,rateText:'20%',note:'Онлайн-покупки'},
-    {name:'KLR bus',category:'Транспорт',rate:10,rateText:'10%',note:'Перша покупка'}
+    {name:'Telemart',category:'Техніка',rate:5,rateText:'5%',note:'Перша покупка'},
+    {name:'tickets.ua APP',category:'Транспорт',rate:6,rateText:'6%',note:'Перша покупка в застосунку'},
+    {name:'KLR bus',category:'Транспорт',rate:10,rateText:'10%',note:'Перша покупка'},
+    {name:'Teahouse.ua',category:'Продукти',rate:20,rateText:'20%',note:'Онлайн-покупки'}
   ];
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm=s=>String(s||'').toLocaleLowerCase('uk-UA').trim();
@@ -46,8 +48,8 @@
     el.dataset.sfMonth=MONTH;
     el.dataset.start=START;
     el.dataset.end=END;
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек monobank жовтень 2026'].join(' '));
-    el.title='monobank · партнерський кешбек за жовтень 2026';
+    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек monobank листопад 2026'].join(' '));
+    el.title='monobank · партнерський кешбек за листопад 2026';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">mono</span></span><span>monobank</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
