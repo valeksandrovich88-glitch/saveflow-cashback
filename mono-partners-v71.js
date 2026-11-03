@@ -50,8 +50,9 @@
     el.dataset.end=END;
     el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек monobank листопад 2026'].join(' '));
     el.title='monobank · партнерський кешбек за листопад 2026';
+    const monoLogo='<span class="sf-mono-partner-logo" aria-hidden="true" style="display:inline-grid;place-items:center;width:18px;height:18px;flex:0 0 18px;overflow:visible"><svg viewBox="0 0 20 20" width="18" height="18" style="display:block;width:18px;height:18px;overflow:visible"><rect x="1.5" y="1.5" width="17" height="17" rx="5" fill="#1b1f29"/><text x="10" y="10.6" text-anchor="middle" dominant-baseline="middle" font-family="Arial,Helvetica,sans-serif" font-size="6.3" font-weight="800" fill="#fff">mono</text></svg></span>';
     el.innerHTML=
-      '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">mono</span></span><span>monobank</span></div>'+
+      '<div class="partner-bank">'+monoLogo+'<span>monobank</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
       '<div class="tag">'+esc(o.category)+'</div>'+
       (o.note?'<div class="offer-note">'+esc(o.note)+'</div>':'');
