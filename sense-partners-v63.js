@@ -1,8 +1,8 @@
 (()=>{
-  const OFFERS=[{"name":"Prom.ua","category":"Маркетплейси","rate":2,"rateText":"2%","note":"Онлайн-оплати · ліміт 500 бонусів/міс"},{"name":"Mathema.me","category":"Освіта","rate":7,"rateText":"7%","note":"Курси математики для учнів"},{"name":"MustHave","category":"Одяг та взуття","rate":7,"rateText":"7%","note":"Онлайн-покупки"},{"name":"Kachoroska","category":"Одяг та взуття","rate":6,"rateText":"6%","note":"Онлайн-покупки"},{"name":"Gepur","category":"Одяг та взуття","rate":8,"rateText":"8%","note":"Магазини та онлайн"},{"name":"OneByOne","category":"Одяг та взуття","rate":8,"rateText":"8%","note":"Магазини та онлайн"},{"name":"Mogoza","category":"Одяг та взуття","rate":0,"rateText":"225 бонусів / чек","note":"Фіксований кешбек за кожен чек"},{"name":"Bagland","category":"Аксесуари / багаж","rate":10,"rateText":"10%","note":"Онлайн-покупки"},{"name":"Samsonite","category":"Аксесуари / багаж","rate":7,"rateText":"7%","note":"Онлайн-оплати"},{"name":"Bomond","category":"Краса","rate":6,"rateText":"6%","note":"Онлайн-покупки"},{"name":"Pleso","category":"Онлайн-сервіси","rate":10,"rateText":"10%","note":"Консультація психолога · ліміт 500 бонусів/міс"},{"name":"SAMSUNG","category":"Техніка","rate":3,"rateText":"3%","note":"Samsung Experience Store та samsungshop.com.ua · ліміт 300 бонусів"},{"name":"КІБЕРНЕТИКИ","category":"Техніка","rate":5,"rateText":"5%","note":"У магазинах та онлайн"},{"name":"MOYO","category":"Техніка","rate":3,"rateText":"3%","note":"У мережі та на сайті"},{"name":"YABLUKA","category":"Техніка","rate":5,"rateText":"5%","note":"Онлайн на ya.ua · ліміт 500 бонусів"},{"name":"Будинок Іграшок","category":"Дитячі товари","rate":5,"rateText":"5%","note":"Онлайн-покупки"},{"name":"MEGOGO BOOKS","category":"Книги та канцтовари","rate":10,"rateText":"10%","note":"Книжки онлайн"},{"name":"Книгарня Є","category":"Книги та канцтовари","rate":4,"rateText":"4%","note":"Онлайн-покупки"},{"name":"TICKETS.UA","category":"Транспорт","rate":5,"rateText":"5%","note":"Оплата квитків у застосунку"},{"name":"OXFORD MEDICAL","category":"Медицина","rate":3,"rateText":"3%","note":"Медичні послуги у Київському регіоні"},{"name":"AMEDA","category":"Медицина","rate":5,"rateText":"5%","note":"Послуги · ліміт 500 бонусів/міс"},{"name":"Agromarket","category":"Сад та город","rate":7,"rateText":"7%","note":"Онлайн-покупки"},{"name":"Leroy Merlin","category":"Дім та ремонт","rate":3,"rateText":"3%","note":"Онлайн-покупки"},{"name":"Apollo Next","category":"Спорт","rate":15,"rateText":"15%","note":"Перша онлайн-підписка для нових клієнтів · ліміт 750 бонусів"},{"name":"Sushi Master","category":"Кафе та ресторани","rate":5,"rateText":"5%","note":"Онлайн-замовлення з оплатою карткою Sense Bank"},{"name":"Львівська майстерня шоколаду","category":"Кафе та ресторани","rate":5,"rateText":"5%","note":"Онлайн-покупки"},{"name":"STORGOM","category":"Дім та ремонт","rate":3,"rateText":"3%","note":"Енергонезалежне обладнання онлайн · ліміт 500 бонусів"},{"name":"ROBINZON","category":"Спорт","rate":7,"rateText":"7%","note":"Онлайн-покупки · ліміт 500 бонусів"},{"name":"VELOPLANETA","category":"Спорт","rate":6,"rateText":"6%","note":"Онлайн-покупки · ліміт 500 бонусів"},{"name":"TOUS","category":"Ювелірні вироби","rate":5,"rateText":"5%","note":"Покупки від 3000 грн карткою Sense Bank"}];
-  const SOURCE="https://sensebank.ua/cash-u-news/zovten-iz-cashu-club-otrimujte-bilse-bonusiv-za-sodenni-pokupki";
+  const OFFERS=[];
+  const SOURCE="https://help.sensebank.com.ua/uk_UA/360017053059";
   const BANK='Sense Bank';
-  const MONTH='2026-10';
+  const MONTH='2026-11';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm=s=>String(s||'').toLocaleLowerCase('uk-UA').trim();
   const collator=new Intl.Collator('uk-UA',{sensitivity:'base',numeric:true});
@@ -18,10 +18,10 @@
     el.dataset.sfSenseCurrent='1';
     el.dataset.sfSource=SOURCE;
     el.dataset.sfMonth=MONTH;
-    el.dataset.start='2026-10-01';
-    el.dataset.end='2026-10-31';
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек Sense Bank жовтень 2026'].join(' '));
-    el.title='Офіційна пропозиція Sense Bank на жовтень 2026';
+    el.dataset.start='2026-11-01';
+    el.dataset.end='2026-11-30';
+    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек Sense Bank листопад 2026'].join(' '));
+    el.title='Sense Bank · персоналізовані пропозиції в Sense SuperApp';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap">'+
         '<img class="mini-logo" src="https://sensebank.com.ua/favicon.ico" alt="" onerror="this.style.display=\'none\'">'+
