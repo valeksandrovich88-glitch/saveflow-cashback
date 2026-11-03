@@ -1,14 +1,24 @@
 (()=>{
   const OFFERS=[
-    {name:"OnTaxi",category:"Таксі",rate:10,rateText:"10%",note:"До 500 грн кешбеку · власні та кредитні кошти",source:"https://globusplus.ua/cashback"},
-    {name:"АТБ",category:"Продукти",rate:6,rateText:"6%",note:"Перше онлайн-замовлення",source:"https://globusplus.ua/blog/zhovtnevi-katehoriyi-keshbeku-ta-novi-propozytsiyi"},
-    {name:"ROOLER",category:"Автотовари та сервіси",rate:6,rateText:"6%",note:"Онлайн-покупки",source:"https://globusplus.ua/blog/zhovtnevi-katehoriyi-keshbeku-ta-novi-propozytsiyi"},
-    {name:"Yves Rocher",category:"Краса",rate:7,rateText:"7%",note:"Онлайн-покупки",source:"https://globusplus.ua/blog/zhovtnevi-katehoriyi-keshbeku-ta-novi-propozytsiyi"}
+    {name:"OnTaxi",category:"Таксі",rate:10,rateText:"10%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"KLO",category:"АЗС",rate:3,rateText:"3%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"WOG",category:"АЗС",rate:4,rateText:"4%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"АТБ",category:"Продукти",rate:6,rateText:"6%",note:"Перше онлайн-замовлення · максимум 600 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"hotline.finance",category:"Страхування",rate:10,rateText:"10%",note:"Онлайн-страхування",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Varus.ua",category:"Продукти",rate:4,rateText:"4%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Polis.ua",category:"Страхування",rate:10,rateText:"10%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Фора",category:"Продукти",rate:3,rateText:"3%",note:"Онлайн-магазин · максимум 1000 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Всі.Свої",category:"Одяг та взуття",rate:5,rateText:"5%",note:"Онлайн-покупки",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Yabluka",category:"Техніка",rate:5,rateText:"5%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"MOYO",category:"Техніка",rate:3,rateText:"3%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Veloplaneta",category:"Спорт та фітнес",rate:6,rateText:"6%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"ROOLER",category:"Автотовари та сервіси",rate:6,rateText:"6%",note:"Максимум 1000 грн",source:"https://finance.ua/ua/cards/cashback-review"},
+    {name:"Tickets.ua",category:"Транспорт",rate:3,rateText:"3%",note:"Максимум 500 грн",source:"https://finance.ua/ua/cards/cashback-review"}
   ];
   const BANK='GlobusPlus';
-  const MONTH='2026-10';
-  const START='2026-10-01';
-  const END='2026-10-31';
+  const MONTH='2026-11';
+  const START='2026-11-01';
+  const END='2026-11-30';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const norm=s=>String(s||'').toLocaleLowerCase('uk-UA').trim();
   let scheduled=false;
@@ -25,8 +35,8 @@
     el.dataset.sfMonth=MONTH;
     el.dataset.start=START;
     el.dataset.end=END;
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек GlobusPlus жовтень 2026'].join(' '));
-    el.title='Офіційно підтверджений партнер GlobusPlus · жовтень 2026';
+    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек GlobusPlus листопад 2026'].join(' '));
+    el.title='GlobusPlus · партнерський кешбек · листопад 2026';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap"><span class="mini-logo mini-logo-fallback">G</span></span><span>GlobusPlus</span></div>'+
       '<div class="partner-top"><div class="partner-name">'+esc(o.name)+'</div><div class="partner-rate">'+esc(o.rateText)+'</div></div>'+
