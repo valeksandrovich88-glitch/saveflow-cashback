@@ -78,8 +78,10 @@
   document.addEventListener('click',e=>{
     const btn=e.target?.closest?.('button,input[type="submit"]');
     if(!isLoginButton(btn))return;
-    const {email,password}=fields();
-    if(!email||!password)return;
+    const {card,email,password}=fields();
+    // Only intercept the actual submit/login control inside the auth card.
+    // The top-level "Увійти" account button must keep its native modal-open handler.
+    if(!email||!password||!card||!card.contains(btn))return;
     e.preventDefault();
     e.stopImmediatePropagation();
     login(btn);
