@@ -1,6 +1,56 @@
 (()=>{
-  const OFFERS=[];
-  const SOURCE="https://help.sensebank.com.ua/uk_UA/360017053059";
+  const OFFERS=[
+    {name:'Sushi Icons онлайн',category:'Кафе та ресторани',rate:10,rateText:'−10%',note:'Знижка на онлайн-замовлення'},
+    {name:'AMEDA',category:"Аптеки / здоров'я",rate:5,rateText:'5%',note:'Кешбек у медзакладах'},
+    {name:'Total Fitness',category:'Спорт та фітнес',rate:70,rateText:'−70%',note:'Знижка'},
+    {name:'Kodi Professional онлайн',category:'Краса',rate:20,rateText:'−20%',note:'Знижка на онлайн-покупки'},
+    {name:'Samsung Experience Store',category:'Техніка',rate:3,rateText:'3%',note:'Кешбек'},
+    {name:'TOUS',category:'Інше',rate:5,rateText:'5%',note:'Кешбек'},
+    {name:'MEGOGO BOOKS',category:'Книги та канцтовари',rate:10,rateText:'10%',note:'Кешбек'},
+    {name:'Будинок іграшок онлайн',category:'Дитячі товари',rate:5,rateText:'5%',note:'Кешбек'},
+    {name:'YABLUKA онлайн',category:'Техніка',rate:5,rateText:'5%',note:'Кешбек'},
+    {name:'MustHave онлайн',category:'Одяг та взуття',rate:7,rateText:'7%',note:'Кешбек'},
+    {name:'Kachorovska онлайн',category:'Одяг та взуття',rate:6,rateText:'6%',note:'Кешбек'},
+    {name:'VARUS онлайн',category:'Продукти',rate:0,rateText:'−150 грн',note:'Знижка на онлайн-покупку'},
+    {name:'Modoza',category:'Одяг та взуття',rate:0,rateText:'225 бонусів',note:"225 Cash’u бонусів"},
+    {name:'GEPUR',category:'Одяг та взуття',rate:8,rateText:'8%',note:'Кешбек'},
+    {name:'KLR Bus',category:'Транспорт',rate:5,rateText:'−5%',note:'Знижка'},
+    {name:'Оксфорд Медікал',category:"Аптеки / здоров'я",rate:3,rateText:'3%',note:'Кешбек у медзакладах'},
+    {name:'Englishdom',category:'Освіта',rate:10,rateText:'−10%',note:'Знижка на освітні курси'},
+    {name:'AntiSchool онлайн',category:'Освіта',rate:20,rateText:'−20%',note:'Знижка на освітні курси'},
+    {name:'Leroy Merlin онлайн',category:'Дім та ремонт',rate:3,rateText:'3%',note:'Кешбек'},
+    {name:'Львівська майстерня шоколаду',category:'Кафе та ресторани',rate:5,rateText:'5%',note:'Кешбек'},
+    {name:'GoITeens',category:'Освіта',rate:0,rateText:'−700 грн',note:'Знижка на освітні курси'},
+    {name:'KIMS',category:'Послуги',rate:30,rateText:'−30%',note:'Знижка на хімчистки'},
+    {name:'Bronui.com',category:'Готелі',rate:0,rateText:'акція',note:'Умови в Sense SuperApp'},
+    {name:'Книгарня Є онлайн',category:'Книги та канцтовари',rate:4,rateText:'4%',note:'Кешбек'},
+    {name:'M-GEAR онлайн',category:'Одяг та взуття',rate:10,rateText:'−10%',note:'Знижка'},
+    {name:'WAUDOG онлайн',category:'Тварини',rate:10,rateText:'−10%',note:'Знижка в зоомагазині'},
+    {name:'ROZETKA',category:'Маркетплейси',rate:0,rateText:'до −200 грн',note:'Знижка'},
+    {name:'УКРПОШТА',category:'Інше',rate:20,rateText:'−20%',note:'Знижка'},
+    {name:'SUNFILL онлайн',category:'Продукти',rate:10,rateText:'−10%',note:'Знижка'},
+    {name:'HILLARY Cosmetics онлайн',category:'Краса',rate:10,rateText:'−10%',note:'Знижка'},
+    {name:'youtv передплата',category:'Розваги',rate:0,rateText:'акція',note:'Умови в Sense SuperApp'},
+    {name:'Optima Hotels & Resorts',category:'Готелі',rate:10,rateText:'−10%',note:'Знижка'},
+    {name:'Tickets.ua застосунок',category:'Транспорт',rate:5,rateText:'5%',note:'Кешбек'},
+    {name:'Exist Assistance онлайн',category:'Автотовари та сервіси',rate:15,rateText:'−15%',note:'Знижка на автосервіс'},
+    {name:'Agro-Market онлайн',category:'Дім та ремонт',rate:7,rateText:'7%',note:'Кешбек'},
+    {name:'iHerb онлайн',category:'Краса',rate:15,rateText:'−15%',note:'Знижка'},
+    {name:'Bagland онлайн',category:'Одяг та взуття',rate:10,rateText:'10%',note:'Кешбек'},
+    {name:'ROBINZON онлайн',category:'Спорт та фітнес',rate:7,rateText:'7%',note:'Кешбек'},
+    {name:'STORGOM онлайн',category:'Дім та ремонт',rate:3,rateText:'3%',note:'Кешбек'},
+    {name:'Stretch Hall',category:'Спорт та фітнес',rate:15,rateText:'−15%',note:'Знижка'},
+    {name:'Terra Incognita',category:'Спорт та фітнес',rate:10,rateText:'−10%',note:'Знижка'},
+    {name:'MOYO',category:'Техніка',rate:3,rateText:'3%',note:'Кешбек'},
+    {name:'Bomond онлайн',category:'Краса',rate:6,rateText:'6%',note:'Кешбек'},
+    {name:'Sushi Master онлайн',category:'Кафе та ресторани',rate:5,rateText:'5%',note:'Кешбек'},
+    {name:'Сушия',category:'Кафе та ресторани',rate:0,rateText:'акція',note:'Умови в Sense SuperApp'},
+    {name:'JustSchool',category:'Освіта',rate:5,rateText:'−5%',note:'Знижка на освітні курси'},
+    {name:'АНЦ',category:"Аптеки / здоров'я",rate:0,rateText:'50 грн',note:'Фіксована вигода'},
+    {name:'Mathema.me',category:'Освіта',rate:7,rateText:'7%',note:'Кешбек'},
+    {name:'Кібернетики',category:'Техніка',rate:5,rateText:'5%',note:'Кешбек'}
+  ];
+  const SOURCE="Sense SuperApp · user screenshots · 2026-11-04";
   const BANK='Sense Bank';
   const MONTH='2026-11';
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -20,8 +70,8 @@
     el.dataset.sfMonth=MONTH;
     el.dataset.start='2026-11-01';
     el.dataset.end='2026-11-30';
-    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерський кешбек Sense Bank листопад 2026'].join(' '));
-    el.title='Sense Bank · персоналізовані пропозиції в Sense SuperApp';
+    el.dataset.search=norm([BANK,o.name,o.category,o.note,'партнерські пропозиції Sense Bank листопад 2026'].join(' '));
+    el.title='Sense Bank · дані з Sense SuperApp · листопад 2026';
     el.innerHTML=
       '<div class="partner-bank"><span class="mini-logo-wrap">'+
         '<img class="mini-logo" src="https://sensebank.com.ua/favicon.ico" alt="" onerror="this.style.display=\'none\'">'+
